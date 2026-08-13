@@ -1,0 +1,159 @@
+name: algorithm-champions
+
+services:
+    postgres:
+        image: postgres:17.6-alpine
+        environment:
+            POSTGRES_DB: champions
+            POSTGRES_USER: champions
+            POSTGRES_PASSWORD: champions
+        ports: ["5432:5432"]
+        volumes: ["postgres-data:/var/lib/postgresql/data"]
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U champions -d champions"]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+    redis:
+        image: redis:8.2.1-alpine
+        command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+        ports: ["6379:6379"]
+        volumes: ["redis-data:/data"]
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+    backend:
+        profiles: ["app"]
+        build:
+            context: .
+            dockerfile: Dockerfile
+        env_file: .env
+        environment:
+            DATABASE_URL: postgres://champions:champions@postgres:5432/champions
+            REDIS_URL: redis://redis:6379
+        ports: ["4000:4000"]
+        depends_on:
+            postgres: { condition: service_healthy }
+            redis: { condition: service_healthy }
+        read_only: true
+        tmpfs: ["/tmp:size=64m"]
+        security_opt: ["no-new-privileges:true"]
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)})",
+                ]
+            interval: 10s
+            timeout: 3s
+            retries: 10
+    judge-worker:
+        profiles: ["workers"]
+        build:
+            context: .
+            dockerfile: Dockerfile
+        command: ["node", "dist/judge-worker.js"]
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            DATABASE_URL: postgres://champions:champions@postgres:5432/champions
+            REDIS_URL: redis://redis:6379
+            JUDGE_IMAGE_PREFIX: ${JUDGE_IMAGE_PREFIX:-algorithm-champions/judge}
+        depends_on:
+            postgres: { condition: service_healthy }
+            redis: { condition: service_healthy }
+        volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    generation-worker:
+        profiles: ["workers"]
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: production
+        command: ["node", "dist/generation-worker.js"]
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            DATABASE_URL: postgres://champions:champions@postgres:5432/champions
+            REDIS_URL: redis://redis:6379
+            OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+            OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+            GENERATION_PROVIDERS: ${GENERATION_PROVIDERS:-openai,openrouter,ollama,rule}
+            GENERATION_PROVIDER_TIMEOUT_MS: ${GENERATION_PROVIDER_TIMEOUT_MS:-90000}
+            OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+            OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+            OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+            OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+            OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+            GENERATION_DAILY_HOUR_KST: ${GENERATION_DAILY_HOUR_KST:-0}
+            GENERATION_DAILY_MINUTE_KST: ${GENERATION_DAILY_MINUTE_KST:-5}
+            # 0=일요일, 1=월요일, ... 6=토요일
+            GENERATION_MEDIUM_WEEKDAYS_KST: ${GENERATION_MEDIUM_WEEKDAYS_KST:-1,3,5}
+            GENERATION_ELITE_WEEKDAYS_KST: ${GENERATION_ELITE_WEEKDAYS_KST:-0}
+            SANDBOX_SERVICE_URL: http://sandbox-runner:4100
+            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-algoleague-local-sandbox-token}
+        depends_on:
+            postgres: { condition: service_healthy }
+            redis: { condition: service_healthy }
+            sandbox-runner: { condition: service_healthy }
+        networks: [default, sandbox-internal]
+        extra_hosts: ["host.docker.internal:host-gateway"]
+    sandbox-runner:
+        profiles: ["workers"]
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: sandbox
+        command: ["node", "dist/sandbox-server.js"]
+        environment:
+            SANDBOX_PORT: 4100
+            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-algoleague-local-sandbox-token}
+        expose: ["4100"]
+        networks: [sandbox-internal]
+        pids_limit: 64
+        mem_limit: 1536m
+        cpus: 1.5
+        read_only: true
+        # Compiled C++ binaries live only in this isolated tmpfs and must be executable.
+        tmpfs: ["/tmp:rw,exec,nosuid,nodev,size=64m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "fetch('http://127.0.0.1:4100/health').then(r=>{if(!r.ok)process.exit(1)})",
+                ]
+            interval: 10s
+            timeout: 3s
+            retries: 10
+    policy-worker:
+        profiles: ["workers"]
+        build:
+            context: .
+            dockerfile: Dockerfile
+        command: ["node", "dist/policy-worker.js"]
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            DATABASE_URL: postgres://champions:champions@postgres:5432/champions
+        depends_on:
+            postgres: { condition: service_healthy }
+
+volumes:
+    postgres-data:
+    redis-data:
+
+networks:
+    sandbox-internal:
+        internal: true

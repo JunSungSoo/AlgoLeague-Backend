@@ -1,0 +1,1321 @@
+{
+    "id": "cc42845a-2187-4c40-81c8-0959e50bffac",
+    "prevId": "e0a25a17-f19b-415b-82e3-03c9d9957d26",
+    "version": "7",
+    "dialect": "postgresql",
+    "tables": {
+        "public.assignments": {
+            "name": "assignments",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "user_id": {
+                    "name": "user_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "problem_id": {
+                    "name": "problem_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "kst_day": {
+                    "name": "kst_day",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "source": {
+                    "name": "source",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "completed_at": {
+                    "name": "completed_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "assignments_user_day_idx": {
+                    "name": "assignments_user_day_idx",
+                    "columns": [
+                        {
+                            "expression": "user_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "kst_day",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "assignments_user_problem_uq": {
+                    "name": "assignments_user_problem_uq",
+                    "columns": [
+                        {
+                            "expression": "user_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "problem_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "assignments_user_id_users_id_fk": {
+                    "name": "assignments_user_id_users_id_fk",
+                    "tableFrom": "assignments",
+                    "tableTo": "users",
+                    "columnsFrom": ["user_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                },
+                "assignments_problem_id_problems_id_fk": {
+                    "name": "assignments_problem_id_problems_id_fk",
+                    "tableFrom": "assignments",
+                    "tableTo": "problems",
+                    "columnsFrom": ["problem_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "no action",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.audit_logs": {
+            "name": "audit_logs",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "actor_id": {
+                    "name": "actor_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "action": {
+                    "name": "action",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "target_type": {
+                    "name": "target_type",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "target_id": {
+                    "name": "target_id",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "metadata": {
+                    "name": "metadata",
+                    "type": "jsonb",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'{}'::jsonb"
+                },
+                "ip_hash": {
+                    "name": "ip_hash",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "audit_target_idx": {
+                    "name": "audit_target_idx",
+                    "columns": [
+                        {
+                            "expression": "target_type",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "target_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "audit_logs_actor_id_users_id_fk": {
+                    "name": "audit_logs_actor_id_users_id_fk",
+                    "tableFrom": "audit_logs",
+                    "tableTo": "users",
+                    "columnsFrom": ["actor_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "no action",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.generation_jobs": {
+            "name": "generation_jobs",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "state": {
+                    "name": "state",
+                    "type": "generation_state",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'REQUESTED'"
+                },
+                "grade": {
+                    "name": "grade",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "blueprint_version": {
+                    "name": "blueprint_version",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "prompt_version": {
+                    "name": "prompt_version",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "model": {
+                    "name": "model",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "seed": {
+                    "name": "seed",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "attempts": {
+                    "name": "attempts",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 0
+                },
+                "package": {
+                    "name": "package",
+                    "type": "jsonb",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "report": {
+                    "name": "report",
+                    "type": "jsonb",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "failure_reason": {
+                    "name": "failure_reason",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "scheduled_for": {
+                    "name": "scheduled_for",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                },
+                "updated_at": {
+                    "name": "updated_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "generation_jobs_queue_idx": {
+                    "name": "generation_jobs_queue_idx",
+                    "columns": [
+                        {
+                            "expression": "state",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "created_at",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {},
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.grade_events": {
+            "name": "grade_events",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "user_id": {
+                    "name": "user_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "event_key": {
+                    "name": "event_key",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "kind": {
+                    "name": "kind",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "from_grade": {
+                    "name": "from_grade",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "to_grade": {
+                    "name": "to_grade",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "checkpoint": {
+                    "name": "checkpoint",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "grade_events_key_uq": {
+                    "name": "grade_events_key_uq",
+                    "columns": [
+                        {
+                            "expression": "event_key",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "grade_events_user_idx": {
+                    "name": "grade_events_user_idx",
+                    "columns": [
+                        {
+                            "expression": "user_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "grade_events_user_id_users_id_fk": {
+                    "name": "grade_events_user_id_users_id_fk",
+                    "tableFrom": "grade_events",
+                    "tableTo": "users",
+                    "columnsFrom": ["user_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.problems": {
+            "name": "problems",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "slug": {
+                    "name": "slug",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "version": {
+                    "name": "version",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 1
+                },
+                "status": {
+                    "name": "status",
+                    "type": "problem_status",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'DRAFT'"
+                },
+                "title": {
+                    "name": "title",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "statement": {
+                    "name": "statement",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "input_description": {
+                    "name": "input_description",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "output_description": {
+                    "name": "output_description",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "constraints": {
+                    "name": "constraints",
+                    "type": "jsonb",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "samples": {
+                    "name": "samples",
+                    "type": "jsonb",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "explanation": {
+                    "name": "explanation",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "grade": {
+                    "name": "grade",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "primary_tag": {
+                    "name": "primary_tag",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "secondary_tags": {
+                    "name": "secondary_tags",
+                    "type": "text[]",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "ARRAY[]::text[]"
+                },
+                "time_limit_ms": {
+                    "name": "time_limit_ms",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 2000
+                },
+                "published_at": {
+                    "name": "published_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "leaked_at": {
+                    "name": "leaked_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "invalidated_at": {
+                    "name": "invalidated_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                },
+                "updated_at": {
+                    "name": "updated_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "problems_slug_version_uq": {
+                    "name": "problems_slug_version_uq",
+                    "columns": [
+                        {
+                            "expression": "slug",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "version",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "problems_catalog_idx": {
+                    "name": "problems_catalog_idx",
+                    "columns": [
+                        {
+                            "expression": "status",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "grade",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {},
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.sessions": {
+            "name": "sessions",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "user_id": {
+                    "name": "user_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "token_hash": {
+                    "name": "token_hash",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "scopes": {
+                    "name": "scopes",
+                    "type": "text[]",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "ARRAY[]::text[]"
+                },
+                "expires_at": {
+                    "name": "expires_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "sessions_token_hash_uq": {
+                    "name": "sessions_token_hash_uq",
+                    "columns": [
+                        {
+                            "expression": "token_hash",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "sessions_user_idx": {
+                    "name": "sessions_user_idx",
+                    "columns": [
+                        {
+                            "expression": "user_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "sessions_user_id_users_id_fk": {
+                    "name": "sessions_user_id_users_id_fk",
+                    "tableFrom": "sessions",
+                    "tableTo": "users",
+                    "columnsFrom": ["user_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.solved_problems": {
+            "name": "solved_problems",
+            "schema": "",
+            "columns": {
+                "user_id": {
+                    "name": "user_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "problem_id": {
+                    "name": "problem_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "submission_id": {
+                    "name": "submission_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "accepted_at": {
+                    "name": "accepted_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "voided_at": {
+                    "name": "voided_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                }
+            },
+            "indexes": {},
+            "foreignKeys": {
+                "solved_problems_user_id_users_id_fk": {
+                    "name": "solved_problems_user_id_users_id_fk",
+                    "tableFrom": "solved_problems",
+                    "tableTo": "users",
+                    "columnsFrom": ["user_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                },
+                "solved_problems_problem_id_problems_id_fk": {
+                    "name": "solved_problems_problem_id_problems_id_fk",
+                    "tableFrom": "solved_problems",
+                    "tableTo": "problems",
+                    "columnsFrom": ["problem_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "no action",
+                    "onUpdate": "no action"
+                },
+                "solved_problems_submission_id_submissions_id_fk": {
+                    "name": "solved_problems_submission_id_submissions_id_fk",
+                    "tableFrom": "solved_problems",
+                    "tableTo": "submissions",
+                    "columnsFrom": ["submission_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "no action",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {
+                "solved_problems_user_id_problem_id_pk": {
+                    "name": "solved_problems_user_id_problem_id_pk",
+                    "columns": ["user_id", "problem_id"]
+                }
+            },
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.submissions": {
+            "name": "submissions",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "user_id": {
+                    "name": "user_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "problem_id": {
+                    "name": "problem_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "language": {
+                    "name": "language",
+                    "type": "language",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "source_code": {
+                    "name": "source_code",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "verdict": {
+                    "name": "verdict",
+                    "type": "verdict",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'QU'"
+                },
+                "runtime_ms": {
+                    "name": "runtime_ms",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "memory_kb": {
+                    "name": "memory_kb",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "attempt_number": {
+                    "name": "attempt_number",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "counts_for_grade": {
+                    "name": "counts_for_grade",
+                    "type": "boolean",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": true
+                },
+                "first_accepted": {
+                    "name": "first_accepted",
+                    "type": "boolean",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": false
+                },
+                "error_message": {
+                    "name": "error_message",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "trace_id": {
+                    "name": "trace_id",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "judged_at": {
+                    "name": "judged_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "submissions_user_problem_idx": {
+                    "name": "submissions_user_problem_idx",
+                    "columns": [
+                        {
+                            "expression": "user_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "problem_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "submissions_queue_idx": {
+                    "name": "submissions_queue_idx",
+                    "columns": [
+                        {
+                            "expression": "verdict",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "created_at",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "submissions_user_id_users_id_fk": {
+                    "name": "submissions_user_id_users_id_fk",
+                    "tableFrom": "submissions",
+                    "tableTo": "users",
+                    "columnsFrom": ["user_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                },
+                "submissions_problem_id_problems_id_fk": {
+                    "name": "submissions_problem_id_problems_id_fk",
+                    "tableFrom": "submissions",
+                    "tableTo": "problems",
+                    "columnsFrom": ["problem_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "no action",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.test_cases": {
+            "name": "test_cases",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "problem_id": {
+                    "name": "problem_id",
+                    "type": "uuid",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "input": {
+                    "name": "input",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "expected_output": {
+                    "name": "expected_output",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "group_name": {
+                    "name": "group_name",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'default'"
+                },
+                "is_public": {
+                    "name": "is_public",
+                    "type": "boolean",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": false
+                },
+                "ordinal": {
+                    "name": "ordinal",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true
+                }
+            },
+            "indexes": {
+                "test_cases_problem_ordinal_uq": {
+                    "name": "test_cases_problem_ordinal_uq",
+                    "columns": [
+                        {
+                            "expression": "problem_id",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        },
+                        {
+                            "expression": "ordinal",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {
+                "test_cases_problem_id_problems_id_fk": {
+                    "name": "test_cases_problem_id_problems_id_fk",
+                    "tableFrom": "test_cases",
+                    "tableTo": "problems",
+                    "columnsFrom": ["problem_id"],
+                    "columnsTo": ["id"],
+                    "onDelete": "cascade",
+                    "onUpdate": "no action"
+                }
+            },
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        },
+        "public.users": {
+            "name": "users",
+            "schema": "",
+            "columns": {
+                "id": {
+                    "name": "id",
+                    "type": "uuid",
+                    "primaryKey": true,
+                    "notNull": true,
+                    "default": "gen_random_uuid()"
+                },
+                "email": {
+                    "name": "email",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "password_hash": {
+                    "name": "password_hash",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "name": {
+                    "name": "name",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "phone": {
+                    "name": "phone",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "phone_verified_at": {
+                    "name": "phone_verified_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "nickname": {
+                    "name": "nickname",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": true
+                },
+                "address": {
+                    "name": "address",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "preferred_language": {
+                    "name": "preferred_language",
+                    "type": "language",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'python'"
+                },
+                "role": {
+                    "name": "role",
+                    "type": "role",
+                    "typeSchema": "public",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "'LEARNER'"
+                },
+                "grade": {
+                    "name": "grade",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 9
+                },
+                "verified_solves": {
+                    "name": "verified_solves",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 0
+                },
+                "grade_checkpoint": {
+                    "name": "grade_checkpoint",
+                    "type": "integer",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": 0
+                },
+                "champions_eligible": {
+                    "name": "champions_eligible",
+                    "type": "boolean",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": false
+                },
+                "last_first_accepted_at": {
+                    "name": "last_first_accepted_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "last_demoted_at": {
+                    "name": "last_demoted_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "suspended_until": {
+                    "name": "suspended_until",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": false
+                },
+                "created_at": {
+                    "name": "created_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                },
+                "updated_at": {
+                    "name": "updated_at",
+                    "type": "timestamp with time zone",
+                    "primaryKey": false,
+                    "notNull": true,
+                    "default": "now()"
+                }
+            },
+            "indexes": {
+                "users_email_uq": {
+                    "name": "users_email_uq",
+                    "columns": [
+                        {
+                            "expression": "email",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "users_phone_uq": {
+                    "name": "users_phone_uq",
+                    "columns": [
+                        {
+                            "expression": "phone",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "users_nickname_uq": {
+                    "name": "users_nickname_uq",
+                    "columns": [
+                        {
+                            "expression": "nickname",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": true,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                },
+                "users_grade_idx": {
+                    "name": "users_grade_idx",
+                    "columns": [
+                        {
+                            "expression": "grade",
+                            "isExpression": false,
+                            "asc": true,
+                            "nulls": "last"
+                        }
+                    ],
+                    "isUnique": false,
+                    "concurrently": false,
+                    "method": "btree",
+                    "with": {}
+                }
+            },
+            "foreignKeys": {},
+            "compositePrimaryKeys": {},
+            "uniqueConstraints": {},
+            "policies": {},
+            "checkConstraints": {},
+            "isRLSEnabled": false
+        }
+    },
+    "enums": {
+        "public.generation_state": {
+            "name": "generation_state",
+            "schema": "public",
+            "values": [
+                "REQUESTED",
+                "GENERATING",
+                "GENERATED",
+                "SCHEMA_VALIDATED",
+                "COMPILED",
+                "FUZZ_VALIDATED",
+                "MUTATION_VALIDATED",
+                "REVIEW_REQUIRED",
+                "APPROVED",
+                "SCHEDULED",
+                "PUBLISHED",
+                "REJECTED_SCHEMA",
+                "REJECTED_COMPILE",
+                "REJECTED_WRONG_ANSWER",
+                "REJECTED_WEAK_TESTS",
+                "REJECTED_DUPLICATE",
+                "REJECTED_AMBIGUOUS"
+            ]
+        },
+        "public.language": {
+            "name": "language",
+            "schema": "public",
+            "values": ["python", "java", "javascript", "cpp"]
+        },
+        "public.problem_status": {
+            "name": "problem_status",
+            "schema": "public",
+            "values": ["DRAFT", "REVIEW", "SCHEDULED", "PUBLISHED", "INVALIDATED", "PRACTICE"]
+        },
+        "public.role": {
+            "name": "role",
+            "schema": "public",
+            "values": ["LEARNER", "OPERATOR", "ADMIN"]
+        },
+        "public.verdict": {
+            "name": "verdict",
+            "schema": "public",
+            "values": ["QU", "RN", "AC", "WA", "CE", "RE", "TLE", "OLE", "SE", "JH", "IE"]
+        }
+    },
+    "schemas": {},
+    "sequences": {},
+    "roles": {},
+    "policies": {},
+    "views": {},
+    "_meta": {
+        "columns": {},
+        "schemas": {},
+        "tables": {}
+    }
+}
