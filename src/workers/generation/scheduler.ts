@@ -127,7 +127,7 @@ export async function enqueueScheduledGeneration(redis: Redis, now = dayjs().toD
                 await redis.del(`generation:enqueue:${job.id}`);
             }
             const retryKey = `generation:enqueue:${job.id}`;
-            if ((await redis.set(retryKey, "1", "EX", 300, "NX")) !== "OK") return;
+            if ((await redis.set(retryKey, "1", "NX")) !== "OK") return;
             const request: GenerationRequest & { id: string; champions: boolean } = {
                 id: job.id,
                 grade,

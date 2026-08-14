@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { functionSpecSchema, functionTestSchema } from "./function-spec";
+import { dayjs } from "../lib/dayjs-config";
 
 export const generationStates = [
     "REQUESTED",
@@ -14,6 +15,36 @@ export const generationStates = [
     "SCHEDULED",
     "PUBLISHED",
 ] as const;
+
+export const activeGenerationStates = [
+    "REQUESTED",
+    "GENERATING",
+    "GENERATED",
+    "SCHEMA_VALIDATED",
+    "COMPILED",
+    "FUZZ_VALIDATED",
+    "MUTATION_VALIDATED",
+] as const;
+
+export const GENERATION_JOB_STALE_MINUTES = 30;
+
+export function operationalGenerationState(
+    state: string,
+    workerOnline: boolean,
+    updatedAt?: Date,
+    now = dayjs().toDate(),
+) {
+    const active = activeGenerationStates.some((activeState) => activeState === state);
+    if (!active) return state;
+    if (!workerOnline) return "STOPPED";
+    if (
+        state !== "REQUESTED" &&
+        updatedAt &&
+        dayjs(now).diff(dayjs(updatedAt), "minute", true) >= GENERATION_JOB_STALE_MINUTES
+    )
+        return "STOPPED";
+    return state;
+}
 
 export const rejectedGenerationStates = [
     "REJECTED_SCHEMA",

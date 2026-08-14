@@ -24,6 +24,7 @@ import {
 import { compareOutput, type JudgeLanguage } from "../domain/judge";
 import { runSandbox } from "../workers/judge/sandbox";
 import { problemTitleKey } from "../domain/problem-identity";
+import { activeGenerationStates, operationalGenerationState } from "../domain/generation";
 import { defaultRuntimeVersion, isRuntimeVersion } from "../domain/runtime-versions";
 import {
     canAccessProblem,
@@ -57,6 +58,23 @@ const completionQuerySchema = z.object({
 });
 const reviewApproveSchema = z.object({ confirmed: z.literal(true) });
 const reviewRejectSchema = z.object({ reason: z.string().trim().min(5).max(500) });
+
+async function generationWorkerIsOnline() {
+    if (!process.env.REDIS_URL) return false;
+    const redis = new Redis(process.env.REDIS_URL, {
+        connectTimeout: 1_000,
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+    });
+    try {
+        await redis.connect();
+        return (await redis.exists("generation:worker:heartbeat")) === 1;
+    } catch {
+        return false;
+    } finally {
+        redis.disconnect();
+    }
+}
 
 export async function registerRoutes(app: FastifyInstance) {
     await registerAuthRoutes(app);
@@ -613,27 +631,18 @@ export async function registerRoutes(app: FastifyInstance) {
         const { db } = await import("../db/index");
         const { generationJobs, problems } = await import("../db/schema");
         const since = dayjs().subtract(24, "hour").toDate();
-        const [jobs, publishedRows, pendingRows, reviewRows, recentRows, failureRows] =
+        const [workerOnline, jobs, publishedRows, activeRows, reviewRows, recentRows, failureRows] =
             await Promise.all([
+                generationWorkerIsOnline(),
                 db.select().from(generationJobs).orderBy(desc(generationJobs.updatedAt)).limit(30),
                 db
                     .select({ value: count() })
                     .from(problems)
                     .where(eq(problems.status, "PUBLISHED")),
                 db
-                    .select({ value: count() })
+                    .select({ state: generationJobs.state, updatedAt: generationJobs.updatedAt })
                     .from(generationJobs)
-                    .where(
-                        inArray(generationJobs.state, [
-                            "REQUESTED",
-                            "GENERATING",
-                            "GENERATED",
-                            "SCHEMA_VALIDATED",
-                            "COMPILED",
-                            "FUZZ_VALIDATED",
-                            "MUTATION_VALIDATED",
-                        ]),
-                    ),
+                    .where(inArray(generationJobs.state, [...activeGenerationStates])),
                 db
                     .select({ value: count() })
                     .from(generationJobs)
@@ -653,23 +662,32 @@ export async function registerRoutes(app: FastifyInstance) {
                     ),
             ]);
         const recent = Number(recentRows[0]?.value ?? 0),
-            failures = Number(failureRows[0]?.value ?? 0);
+            failures = Number(failureRows[0]?.value ?? 0),
+            stoppedCount = activeRows.filter(
+                (job) =>
+                    operationalGenerationState(job.state, workerOnline, job.updatedAt) ===
+                    "STOPPED",
+            ).length;
         return {
             generatedAt: dayjs().toISOString(),
             metrics: {
                 published: Number(publishedRows[0]?.value ?? 0),
-                inProgress: Number(pendingRows[0]?.value ?? 0),
+                inProgress: activeRows.length - stoppedCount,
+                stopped: stoppedCount,
                 reviewRequired: Number(reviewRows[0]?.value ?? 0),
                 failureRate24h: recent ? Math.round((failures / recent) * 1000) / 10 : 0,
+                workerOnline,
             },
             jobs: jobs.map((job) => {
                 const pkg = job.package as { title?: string } | null;
                 const report = job.report as { mutationScore?: number } | null;
+                const state = operationalGenerationState(job.state, workerOnline, job.updatedAt);
                 return {
                     id: job.id,
                     title: pkg?.title ?? "제목 생성 대기",
                     grade: job.grade,
-                    state: job.state,
+                    state,
+                    databaseState: job.state,
                     blueprint: job.blueprintVersion,
                     model: job.model,
                     score:
@@ -677,7 +695,11 @@ export async function registerRoutes(app: FastifyInstance) {
                             ? Math.round(report.mutationScore * 100)
                             : null,
                     attempts: job.attempts,
-                    failureReason: job.failureReason,
+                    failureReason:
+                        job.failureReason ??
+                        (state === "STOPPED"
+                            ? "문제 생성 워커가 실행 중이지 않아 처리가 중지되었습니다."
+                            : null),
                     updatedAt: dayjs(job.updatedAt).toISOString(),
                 };
             }),

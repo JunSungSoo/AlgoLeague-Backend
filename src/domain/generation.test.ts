@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canAutoPublish, requiresHumanReview } from "./generation";
+import { canAutoPublish, operationalGenerationState, requiresHumanReview } from "./generation";
+import { dayjs } from "../lib/dayjs-config";
 
 const passingReport = {
     schema: true,
@@ -12,6 +13,32 @@ const passingReport = {
 };
 
 describe("generation publication policy", () => {
+    it("marks active jobs as stopped when the generation worker is offline", () => {
+        expect(operationalGenerationState("REQUESTED", false)).toBe("STOPPED");
+        expect(operationalGenerationState("GENERATING", false)).toBe("STOPPED");
+        expect(operationalGenerationState("REVIEW_REQUIRED", false)).toBe("REVIEW_REQUIRED");
+        expect(operationalGenerationState("GENERATING", true)).toBe("GENERATING");
+    });
+
+    it("marks stale claimed jobs as stopped even when another worker is online", () => {
+        const now = dayjs("2026-08-14T02:00:00Z").toDate();
+        expect(
+            operationalGenerationState(
+                "GENERATING",
+                true,
+                dayjs("2026-08-14T01:20:00Z").toDate(),
+                now,
+            ),
+        ).toBe("STOPPED");
+        expect(
+            operationalGenerationState(
+                "GENERATING",
+                true,
+                dayjs("2026-08-14T01:50:00Z").toDate(),
+                now,
+            ),
+        ).toBe("GENERATING");
+    });
     it("auto-publishes validated grade 2 through 9 problems", () => {
         for (let grade = 2; grade <= 9; grade++)
             expect(canAutoPublish(grade, false, passingReport)).toBe(true);
