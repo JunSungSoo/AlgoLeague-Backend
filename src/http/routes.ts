@@ -1,8 +1,30 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import Redis from "ioredis";
-import { and, count, desc, eq, gte, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import {
+    and,
+    asc,
+    count,
+    countDistinct,
+    desc,
+    eq,
+    gte,
+    inArray,
+    isNull,
+    ne,
+    notInArray,
+    sql,
+} from "drizzle-orm";
 import { z } from "zod";
+import {
+    buildFunctionHarness,
+    expectedFunctionOutput,
+    type FunctionSpec,
+} from "../domain/function-spec";
+import { compareOutput, type JudgeLanguage } from "../domain/judge";
+import { runSandbox } from "../workers/judge/sandbox";
+import { problemTitleKey } from "../domain/problem-identity";
+import { defaultRuntimeVersion, isRuntimeVersion } from "../domain/runtime-versions";
 import {
     canAccessProblem,
     gradeProgress,
@@ -13,10 +35,25 @@ import {
 import { requireScope } from "./auth";
 import { registerAuthRoutes } from "./auth-routes";
 import { registerDashboardRoutes } from "./dashboard-routes";
+import { dayjs } from "../lib/dayjs-config";
 
-const codeSchema = z.object({
-    language: z.enum(["python", "java", "javascript", "cpp"]),
-    code: z.string().min(1).max(100_000),
+const codeSchema = z
+    .object({
+        language: z.enum(["python", "java", "javascript", "cpp"]),
+        runtimeVersion: z.string().min(1).max(40).optional(),
+        code: z.string().min(1).max(100_000),
+    })
+    .superRefine((value, context) => {
+        if (value.runtimeVersion && !isRuntimeVersion(value.language, value.runtimeVersion))
+            context.addIssue({
+                code: "custom",
+                path: ["runtimeVersion"],
+                message: "지원하지 않는 실행 버전입니다.",
+            });
+    });
+const completionQuerySchema = z.object({
+    sort: z.enum(["recommended", "latest", "comments"]).default("recommended"),
+    page: z.coerce.number().int().min(1).default(1),
 });
 
 export async function registerRoutes(app: FastifyInstance) {
@@ -25,7 +62,7 @@ export async function registerRoutes(app: FastifyInstance) {
     app.get("/api/health", async () => ({
         status: "ok",
         service: "algorithm-champions-back",
-        time: new Date().toISOString(),
+        time: dayjs().toISOString(),
     }));
     app.get("/api/problems", async (request, reply) => {
         const session = await requireScope(request, "problem:read");
@@ -56,7 +93,10 @@ export async function registerRoutes(app: FastifyInstance) {
                 .where(eq(problems.status, "PUBLISHED"))
                 .orderBy(desc(problems.publishedAt), desc(problems.createdAt)),
             db
-                .select({ problemId: solvedProblems.problemId })
+                .select({
+                    problemId: solvedProblems.problemId,
+                    submissionId: solvedProblems.submissionId,
+                })
                 .from(solvedProblems)
                 .where(
                     and(eq(solvedProblems.userId, session.userId), isNull(solvedProblems.voidedAt)),
@@ -78,10 +118,17 @@ export async function registerRoutes(app: FastifyInstance) {
                 { total: Number(item.total), accepted: Number(item.accepted) },
             ]),
         );
+        const seenTitles = new Set<string>();
+        const uniqueCatalog = catalog.filter((problem) => {
+            const key = problemTitleKey(problem.title);
+            if (seenTitles.has(key)) return false;
+            seenTitles.add(key);
+            return true;
+        });
         return {
             userGrade: user.grade,
             accessibleRange: { from: 9, to: Math.max(1, user.grade - 1) },
-            items: catalog.map(({ id, ...problem }) => {
+            items: uniqueCatalog.map(({ id, ...problem }) => {
                 const stat = stats.get(id);
                 return {
                     ...problem,
@@ -129,7 +176,10 @@ export async function registerRoutes(app: FastifyInstance) {
                 .groupBy(problems.id)
                 .orderBy(desc(sql`max(${submissions.createdAt})`)),
             db
-                .select({ problemId: solvedProblems.problemId })
+                .select({
+                    problemId: solvedProblems.problemId,
+                    submissionId: solvedProblems.submissionId,
+                })
                 .from(solvedProblems)
                 .where(
                     and(eq(solvedProblems.userId, session.userId), isNull(solvedProblems.voidedAt)),
@@ -163,7 +213,7 @@ export async function registerRoutes(app: FastifyInstance) {
                     acceptanceRate: stat?.total
                         ? Math.round((stat.accepted / stat.total) * 100)
                         : null,
-                    lastSubmittedAt: lastSubmittedAt.toISOString(),
+                    lastSubmittedAt: dayjs(lastSubmittedAt).toISOString(),
                     submissionCount: Number(submissionCount),
                 };
             }),
@@ -193,7 +243,10 @@ export async function registerRoutes(app: FastifyInstance) {
         if (!problem) return reply.code(404).send({ error: "게시 중인 문제를 찾을 수 없습니다." });
         const [[solved], [attemptRow]] = await Promise.all([
             db
-                .select({ problemId: solvedProblems.problemId })
+                .select({
+                    problemId: solvedProblems.problemId,
+                    submissionId: solvedProblems.submissionId,
+                })
                 .from(solvedProblems)
                 .where(
                     and(
@@ -229,13 +282,193 @@ export async function registerRoutes(app: FastifyInstance) {
                 outputDescription: problem.outputDescription,
                 constraints: problem.constraints,
                 samples: problem.samples,
+                executionMode: problem.executionMode,
+                functionSpec: problem.functionSpec,
+                sampleTests:
+                    problem.executionMode === "function" ? problem.samples.slice(0, 3) : [],
                 grade: problem.grade,
                 primaryTag: problem.primaryTag,
                 secondaryTags: problem.secondaryTags,
                 timeLimitMs: problem.timeLimitMs,
                 solved: Boolean(solved),
+                acceptedSubmissionId: solved?.submissionId ?? null,
                 attempts,
                 submissionLimit: limit,
+            },
+        };
+    });
+    app.get<{ Params: { id: string } }>("/api/submissions/:id/status", async (request, reply) => {
+        const session = await requireScope(request, "problem:read");
+        if (!session) return reply.code(401).send({ error: "로그인이 필요합니다." });
+        if (!process.env.DATABASE_URL)
+            return reply.code(503).send({ error: "채점 결과 조회에는 DATABASE_URL이 필요합니다." });
+        const { db } = await import("../db/index");
+        const { problems, submissions } = await import("../db/schema");
+        const [submission] = await db
+            .select({
+                id: submissions.id,
+                verdict: submissions.verdict,
+                problemSlug: problems.slug,
+                judgedAt: submissions.judgedAt,
+                errorMessage: submissions.errorMessage,
+            })
+            .from(submissions)
+            .innerJoin(problems, eq(submissions.problemId, problems.id))
+            .where(
+                and(eq(submissions.id, request.params.id), eq(submissions.userId, session.userId)),
+            )
+            .limit(1);
+        if (!submission) return reply.code(404).send({ error: "제출 기록을 찾을 수 없습니다." });
+        return {
+            submission: {
+                ...submission,
+                judgedAt: submission.judgedAt ? dayjs(submission.judgedAt).toISOString() : null,
+            },
+        };
+    });
+    app.get<{
+        Params: { id: string };
+        Querystring: { sort?: string; page?: string };
+    }>("/api/submissions/:id/completion", async (request, reply) => {
+        const session = await requireScope(request, "problem:read");
+        if (!session) return reply.code(401).send({ error: "로그인이 필요합니다." });
+        const parsed = completionQuerySchema.safeParse(request.query);
+        if (!parsed.success)
+            return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+        if (!process.env.DATABASE_URL)
+            return reply.code(503).send({ error: "완료 답안 조회에는 DATABASE_URL이 필요합니다." });
+        const { db } = await import("../db/index");
+        const { problems, submissionComments, submissionRecommendations, submissions, users } =
+            await import("../db/schema");
+        const [own] = await db
+            .select({
+                id: submissions.id,
+                problemId: submissions.problemId,
+                problemSlug: problems.slug,
+                problemTitle: problems.title,
+                problemGrade: problems.grade,
+                language: submissions.language,
+                runtimeVersion: submissions.runtimeVersion,
+                sourceCode: submissions.sourceCode,
+                verdict: submissions.verdict,
+                runtimeMs: submissions.runtimeMs,
+                memoryKb: submissions.memoryKb,
+                createdAt: submissions.createdAt,
+                judgedAt: submissions.judgedAt,
+                nickname: users.nickname,
+                profileImageUrl: users.profileImageUrl,
+                recommendationCount: countDistinct(submissionRecommendations.userId),
+                commentCount: countDistinct(submissionComments.id),
+            })
+            .from(submissions)
+            .innerJoin(problems, eq(submissions.problemId, problems.id))
+            .innerJoin(users, eq(submissions.userId, users.id))
+            .leftJoin(
+                submissionRecommendations,
+                eq(submissionRecommendations.submissionId, submissions.id),
+            )
+            .leftJoin(submissionComments, eq(submissionComments.submissionId, submissions.id))
+            .where(
+                and(eq(submissions.id, request.params.id), eq(submissions.userId, session.userId)),
+            )
+            .groupBy(submissions.id, problems.id, users.id)
+            .limit(1);
+        if (!own) return reply.code(404).send({ error: "제출 기록을 찾을 수 없습니다." });
+        if (own.verdict !== "AC")
+            return reply
+                .code(409)
+                .send({ error: "정답으로 확정된 제출만 완료 화면에서 볼 수 있습니다." });
+
+        const pageSize = 6;
+        const offset = (parsed.data.page - 1) * pageSize;
+        const recommendationCount = countDistinct(submissionRecommendations.userId);
+        const commentCount = countDistinct(submissionComments.id);
+        const primaryOrder =
+            parsed.data.sort === "latest"
+                ? desc(submissions.createdAt)
+                : parsed.data.sort === "comments"
+                  ? desc(commentCount)
+                  : desc(recommendationCount);
+        const [[totalRow], answers] = await Promise.all([
+            db
+                .select({ value: count() })
+                .from(submissions)
+                .where(
+                    and(
+                        eq(submissions.problemId, own.problemId),
+                        eq(submissions.verdict, "AC"),
+                        eq(submissions.firstAccepted, true),
+                        ne(submissions.userId, session.userId),
+                    ),
+                ),
+            db
+                .select({
+                    id: submissions.id,
+                    nickname: users.nickname,
+                    profileImageUrl: users.profileImageUrl,
+                    language: submissions.language,
+                    runtimeVersion: submissions.runtimeVersion,
+                    sourceCode: submissions.sourceCode,
+                    runtimeMs: submissions.runtimeMs,
+                    createdAt: submissions.createdAt,
+                    recommendationCount,
+                    commentCount,
+                })
+                .from(submissions)
+                .innerJoin(users, eq(submissions.userId, users.id))
+                .leftJoin(
+                    submissionRecommendations,
+                    eq(submissionRecommendations.submissionId, submissions.id),
+                )
+                .leftJoin(submissionComments, eq(submissionComments.submissionId, submissions.id))
+                .where(
+                    and(
+                        eq(submissions.problemId, own.problemId),
+                        eq(submissions.verdict, "AC"),
+                        eq(submissions.firstAccepted, true),
+                        ne(submissions.userId, session.userId),
+                    ),
+                )
+                .groupBy(submissions.id, users.id)
+                .orderBy(primaryOrder, desc(submissions.createdAt), desc(submissions.id))
+                .limit(pageSize)
+                .offset(offset),
+        ]);
+        const total = Number(totalRow?.value ?? 0);
+        return {
+            problem: {
+                slug: own.problemSlug,
+                title: own.problemTitle,
+                grade: own.problemGrade,
+            },
+            submission: {
+                id: own.id,
+                nickname: own.nickname,
+                profileImageUrl: own.profileImageUrl,
+                language: own.language,
+                runtimeVersion:
+                    own.runtimeVersion ?? defaultRuntimeVersion(own.language as JudgeLanguage),
+                sourceCode: own.sourceCode,
+                verdict: own.verdict,
+                runtimeMs: own.runtimeMs,
+                memoryKb: own.memoryKb,
+                recommendationCount: Number(own.recommendationCount),
+                commentCount: Number(own.commentCount),
+                createdAt: dayjs(own.createdAt).toISOString(),
+                judgedAt: own.judgedAt ? dayjs(own.judgedAt).toISOString() : null,
+            },
+            answers: {
+                sort: parsed.data.sort,
+                page: parsed.data.page,
+                pageSize,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / pageSize)),
+                items: answers.map((answer) => ({
+                    ...answer,
+                    recommendationCount: Number(answer.recommendationCount),
+                    commentCount: Number(answer.commentCount),
+                    createdAt: dayjs(answer.createdAt).toISOString(),
+                })),
             },
         };
     });
@@ -287,7 +520,7 @@ export async function registerRoutes(app: FastifyInstance) {
         }
         return {
             grade,
-            generatedAt: new Date().toISOString(),
+            generatedAt: dayjs().toISOString(),
             currentUserId: session.userId,
             items: learners.map((user, index) => {
                 const stat = byUser.get(user.id);
@@ -299,7 +532,7 @@ export async function registerRoutes(app: FastifyInstance) {
                     acceptanceRate: stat?.total
                         ? Math.round((stat.accepted / stat.total) * 100)
                         : null,
-                    lastActivityAt: stat?.recent?.toISOString() ?? null,
+                    lastActivityAt: stat?.recent ? dayjs(stat.recent).toISOString() : null,
                 };
             }),
         };
@@ -347,10 +580,10 @@ export async function registerRoutes(app: FastifyInstance) {
             verifiedSolves: user.verifiedSolves,
             progress: { ...gradeProgress(state), next: user.grade > 1 ? user.grade - 1 : null },
             championsEligible: user.championsEligible,
-            acceptedDates: accepted.map((item) => item.acceptedAt.toISOString()),
+            acceptedDates: accepted.map((item) => dayjs(item.acceptedAt).toISOString()),
             events: recentEvents.map((item) => ({
                 ...item,
-                createdAt: item.createdAt.toISOString(),
+                createdAt: dayjs(item.createdAt).toISOString(),
             })),
         };
     });
@@ -361,7 +594,7 @@ export async function registerRoutes(app: FastifyInstance) {
             return reply.code(503).send({ error: "운영 현황 조회에는 DATABASE_URL이 필요합니다." });
         const { db } = await import("../db/index");
         const { generationJobs, problems } = await import("../db/schema");
-        const since = new Date(Date.now() - 86_400_000);
+        const since = dayjs().subtract(24, "hour").toDate();
         const [jobs, publishedRows, pendingRows, reviewRows, recentRows, failureRows] =
             await Promise.all([
                 db.select().from(generationJobs).orderBy(desc(generationJobs.updatedAt)).limit(30),
@@ -404,7 +637,7 @@ export async function registerRoutes(app: FastifyInstance) {
         const recent = Number(recentRows[0]?.value ?? 0),
             failures = Number(failureRows[0]?.value ?? 0);
         return {
-            generatedAt: new Date().toISOString(),
+            generatedAt: dayjs().toISOString(),
             metrics: {
                 published: Number(publishedRows[0]?.value ?? 0),
                 inProgress: Number(pendingRows[0]?.value ?? 0),
@@ -427,7 +660,7 @@ export async function registerRoutes(app: FastifyInstance) {
                             : null,
                     attempts: job.attempts,
                     failureReason: job.failureReason,
-                    updatedAt: job.updatedAt.toISOString(),
+                    updatedAt: dayjs(job.updatedAt).toISOString(),
                 };
             }),
         };
@@ -438,12 +671,71 @@ export async function registerRoutes(app: FastifyInstance) {
         const parsed = codeSchema.safeParse(request.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-        return reply.code(202).send({
-            id: randomUUID(),
-            status: "QU",
-            verdict: "QU",
-            message: "예제 실행이 접수되었습니다.",
-        });
+        if (!process.env.DATABASE_URL)
+            return reply.code(503).send({ error: "예제 실행에는 DATABASE_URL이 필요합니다." });
+        const { db } = await import("../db/index");
+        const { problems, testCases } = await import("../db/schema");
+        const [problem] = await db
+            .select()
+            .from(problems)
+            .where(and(eq(problems.slug, request.params.id), eq(problems.status, "PUBLISHED")))
+            .orderBy(desc(problems.version))
+            .limit(1);
+        if (!problem) return reply.code(404).send({ error: "게시 중인 문제를 찾을 수 없습니다." });
+        const samples = await db
+            .select()
+            .from(testCases)
+            .where(and(eq(testCases.problemId, problem.id), eq(testCases.isPublic, true)))
+            .orderBy(asc(testCases.ordinal))
+            .limit(3);
+        if (!samples.length)
+            return reply.code(409).send({ error: "공개 Sample Test가 등록되지 않았습니다." });
+        const results = [];
+        for (const [index, sample] of samples.entries()) {
+            let source = parsed.data.code;
+            let input = sample.input;
+            let expected = sample.expectedOutput;
+            if (problem.executionMode === "function") {
+                if (!problem.functionSpec || !sample.argumentsJson || sample.expectedValue === null)
+                    return reply.code(500).send({ error: "함수 테스트 명세가 누락되었습니다." });
+                source = buildFunctionHarness(
+                    parsed.data.language as JudgeLanguage,
+                    source,
+                    problem.functionSpec as FunctionSpec,
+                    sample.argumentsJson,
+                );
+                input = "";
+                expected = expectedFunctionOutput(sample.expectedValue);
+            }
+            const result = await runSandbox(
+                parsed.data.language,
+                source,
+                input,
+                problem.timeLimitMs,
+                parsed.data.runtimeVersion ?? defaultRuntimeVersion(parsed.data.language),
+            );
+            const passed = result.verdict === "AC" && compareOutput(result.stdout, expected);
+            results.push({
+                ordinal: index + 1,
+                passed,
+                verdict: passed ? "AC" : result.verdict === "AC" ? "WA" : result.verdict,
+                durationMs: Math.round(result.durationMs),
+                errorMessage: result.stderr || null,
+            });
+            if (!passed) break;
+        }
+        const passed =
+            results.length === samples.length && results.every((result) => result.passed);
+        return {
+            status: passed ? "AC" : results.at(-1)?.verdict,
+            verdict: passed ? "AC" : results.at(-1)?.verdict,
+            message: passed
+                ? `공개 Sample Tests ${samples.length}개를 모두 통과했습니다.`
+                : `Sample Test ${results.at(-1)?.ordinal}에서 실패했습니다.`,
+            sampleTests: results,
+            runtimeVersion:
+                parsed.data.runtimeVersion ?? defaultRuntimeVersion(parsed.data.language),
+        };
     });
     app.post<{ Params: { id: string } }>("/api/problems/:id/submit", async (request, reply) => {
         const session = await requireScope(request, "submission:write");
@@ -489,6 +781,8 @@ export async function registerRoutes(app: FastifyInstance) {
             userId: session.userId,
             problemId: problem.id,
             language: parsed.data.language,
+            runtimeVersion:
+                parsed.data.runtimeVersion ?? defaultRuntimeVersion(parsed.data.language),
             sourceCode: parsed.data.code,
             attemptNumber: attempts + 1,
             traceId,

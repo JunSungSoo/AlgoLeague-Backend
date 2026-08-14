@@ -1,30 +1,26 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, count, desc, eq, gt, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { gradeProgress, type Grade, type GradeState } from "../domain/grade-policy";
+import { dayjs } from "../lib/dayjs-config";
 import { requireScope } from "./auth";
 
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-function kstDay(date = new Date()) {
-    return new Date(date.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+function kstDay(date = dayjs().toDate()) {
+    return dayjs(date).tz().format("YYYY-MM-DD");
 }
 function startOfKstDay(day: string) {
-    return new Date(`${day}T00:00:00+09:00`);
+    return dayjs.tz(day).startOf("day").toDate();
 }
-function startOfKstWeek(now = new Date()) {
-    const local = new Date(now.getTime() + KST_OFFSET_MS);
-    const day = (local.getUTCDay() + 6) % 7;
-    local.setUTCDate(local.getUTCDate() - day);
-    local.setUTCHours(0, 0, 0, 0);
-    return new Date(local.getTime() - KST_OFFSET_MS);
+function startOfKstWeek(now = dayjs().toDate()) {
+    return dayjs(now).tz().startOf("isoWeek").toDate();
 }
 function streakFromDates(dates: Date[], today = kstDay()) {
     const days = new Set(dates.map((date) => kstDay(date)));
     let cursor = startOfKstDay(today);
-    if (!days.has(kstDay(cursor))) cursor = new Date(cursor.getTime() - 86_400_000);
+    if (!days.has(kstDay(cursor))) cursor = dayjs(cursor).subtract(1, "day").toDate();
     let streak = 0;
     while (days.has(kstDay(cursor))) {
         streak += 1;
-        cursor = new Date(cursor.getTime() - 86_400_000);
+        cursor = dayjs(cursor).subtract(1, "day").toDate();
     }
     return streak;
 }
@@ -216,7 +212,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
                 type: "submission" as const,
                 title: `${item.title} ${item.verdict === "AC" ? "정답" : item.verdict}`,
                 detail: `${item.language}${item.runtimeMs != null ? ` · ${item.runtimeMs}ms` : ""}${item.firstAccepted ? " · 최초 정답" : ""}`,
-                occurredAt: (item.judgedAt ?? item.createdAt).toISOString(),
+                occurredAt: dayjs(item.judgedAt ?? item.createdAt).toISOString(),
             })),
             ...recentGradeEvents.map((item) => ({
                 id: `grade:${item.id}`,
@@ -227,23 +223,23 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
                         : item.kind === "DEMOTED"
                           ? `${item.toGrade}급으로 조정되었어요`
                           : item.kind === "CHAMPIONS_ELIGIBLE"
-                            ? "챔피언스 출전 자격을 얻었어요"
-                            : "챔피언스 출전 자격이 조정되었어요",
+                            ? "리그 참가권을 획득했어요"
+                            : "리그 참가권이 조정되었어요",
                 detail: `${item.fromGrade}급 → ${item.toGrade}급 · 누적 정답 ${item.checkpoint}개`,
-                occurredAt: item.createdAt.toISOString(),
+                occurredAt: dayjs(item.createdAt).toISOString(),
             })),
             ...recentAssignments.map((item) => ({
                 id: `assignment:${item.id}`,
                 type: "assignment" as const,
                 title: "오늘의 문제가 배정되었어요",
                 detail: `${item.title} · ${item.grade}급`,
-                occurredAt: item.createdAt.toISOString(),
+                occurredAt: dayjs(item.createdAt).toISOString(),
             })),
         ]
             .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
             .slice(0, 8);
         return {
-            generatedAt: new Date().toISOString(),
+            generatedAt: dayjs().toISOString(),
             kstDay: today,
             user: {
                 nickname: user.nickname,

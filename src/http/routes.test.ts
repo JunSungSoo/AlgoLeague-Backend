@@ -50,7 +50,7 @@ describe("backend API", () => {
         });
         expect(authenticated.statusCode).toBe(503);
     });
-    it("requires the database for catalog, my problems, detail, ranking, progress and admin data", async () => {
+    it("requires the database for catalog, submissions, ranking, progress and admin data", async () => {
         const responses = await Promise.all([
             app.inject({ method: "GET", url: "/api/problems", headers: auth() }),
             app.inject({ method: "GET", url: "/api/my-problems", headers: auth() }),
@@ -58,9 +58,15 @@ describe("backend API", () => {
             app.inject({ method: "GET", url: "/api/rankings/6", headers: auth() }),
             app.inject({ method: "GET", url: "/api/grade-progress", headers: auth() }),
             app.inject({ method: "GET", url: "/api/admin/overview", headers: auth() }),
+            app.inject({ method: "GET", url: "/api/submissions/example/status", headers: auth() }),
+            app.inject({
+                method: "GET",
+                url: "/api/submissions/example/completion?sort=recommended&page=1",
+                headers: auth(),
+            }),
         ]);
         expect(responses.map((response) => response.statusCode)).toEqual([
-            503, 503, 503, 503, 503, 503,
+            503, 503, 503, 503, 503, 503, 503, 503,
         ]);
     });
     it("validates grade params for authenticated users", async () => {
