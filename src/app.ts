@@ -6,7 +6,8 @@ export async function buildApp() {
     const app = Fastify({
         logger: process.env.NODE_ENV !== "test",
         bodyLimit: 400_000,
-        requestTimeout: 10_000,
+        // A runtime image may need to be prepared on the first execution.
+        requestTimeout: 200_000,
     });
     const allowedOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
     await app.register(cors, {

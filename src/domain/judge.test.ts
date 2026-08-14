@@ -13,10 +13,23 @@ describe("judge policy", () => {
         for (const language of ["python", "java", "javascript", "cpp"] as const) {
             const args = dockerArgumentsFor(language);
             expect(args).toContain("none");
+            expect(args).toContain("--rm");
+            expect(args).toContain("--init");
+            expect(args).toContain("never");
             expect(args).toContain("--read-only");
             expect(args).toContain("1g");
             expect(args).toContain("ALL");
             expect(args).toContain("no-new-privileges");
+            expect(args).toContain("65534:65534");
+            expect(args).not.toContain("--mount");
         }
+    });
+    it("selects the requested runtime image and C++ standard", () => {
+        expect(dockerArgumentsFor("javascript", "job", "node22")).toContain(
+            "node:22.22.0-bookworm-slim",
+        );
+        const cpp = dockerArgumentsFor("cpp", "job", "cpp17-gcc13");
+        expect(cpp).toContain("gcc:13.4");
+        expect(cpp.at(-1)).toContain("-std=gnu++17");
     });
 });

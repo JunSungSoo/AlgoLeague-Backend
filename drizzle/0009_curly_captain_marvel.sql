@@ -1,0 +1,2 @@
+DROP INDEX "problems_published_title_key_uq";--> statement-breakpoint
+CREATE UNIQUE INDEX "problems_published_title_key_uq" ON "problems" USING btree (lower(regexp_replace("title", '[^[:alnum:]가-힣]', '', 'g'))) WHERE "problems"."status" = 'PUBLISHED';

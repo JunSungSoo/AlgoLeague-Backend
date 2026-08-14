@@ -12,6 +12,7 @@ import {
     uniqueIndex,
     uuid,
 } from "drizzle-orm/pg-core";
+import type { FunctionSpec, FunctionTestValue } from "../domain/function-spec";
 
 export const roleEnum = pgEnum("role", ["LEARNER", "OPERATOR", "ADMIN"]);
 export const problemStatusEnum = pgEnum("problem_status", [
@@ -128,7 +129,19 @@ export const problems = pgTable(
         inputDescription: text("input_description").notNull(),
         outputDescription: text("output_description").notNull(),
         constraints: jsonb("constraints").$type<string[]>().notNull(),
-        samples: jsonb("samples").$type<Array<{ input: string; output: string }>>().notNull(),
+        samples: jsonb("samples")
+            .$type<
+                Array<{
+                    input: string;
+                    output: string;
+                    arguments?: FunctionTestValue[];
+                    expected?: FunctionTestValue;
+                }>
+            >()
+            .notNull(),
+        executionMode: text("execution_mode").notNull().default("stdio"),
+        functionSpec: jsonb("function_spec").$type<FunctionSpec>(),
+        contentFingerprint: text("content_fingerprint"),
         explanation: text("explanation").notNull(),
         grade: integer("grade").notNull(),
         primaryTag: text("primary_tag").notNull(),
@@ -144,6 +157,12 @@ export const problems = pgTable(
     },
     (table) => [
         uniqueIndex("problems_slug_version_uq").on(table.slug, table.version),
+        uniqueIndex("problems_published_title_key_uq")
+            .on(sql`lower(regexp_replace(${table.title}, '[^[:alnum:]가-힣]', '', 'g'))`)
+            .where(sql`${table.status} = 'PUBLISHED'`),
+        uniqueIndex("problems_published_fingerprint_uq")
+            .on(table.contentFingerprint)
+            .where(sql`${table.status} = 'PUBLISHED' and ${table.contentFingerprint} is not null`),
         index("problems_catalog_idx").on(table.status, table.grade),
     ],
 );
@@ -157,6 +176,8 @@ export const testCases = pgTable(
             .references(() => problems.id, { onDelete: "cascade" }),
         input: text("input").notNull(),
         expectedOutput: text("expected_output").notNull(),
+        argumentsJson: jsonb("arguments_json").$type<FunctionTestValue[]>(),
+        expectedValue: jsonb("expected_value").$type<FunctionTestValue>(),
         groupName: text("group_name").notNull().default("default"),
         isPublic: boolean("is_public").notNull().default(false),
         ordinal: integer("ordinal").notNull(),
@@ -196,6 +217,7 @@ export const submissions = pgTable(
             .notNull()
             .references(() => problems.id),
         language: languageEnum("language").notNull(),
+        runtimeVersion: text("runtime_version"),
         sourceCode: text("source_code").notNull(),
         verdict: verdictEnum("verdict").notNull().default("QU"),
         runtimeMs: integer("runtime_ms"),
@@ -211,6 +233,41 @@ export const submissions = pgTable(
     (table) => [
         index("submissions_user_problem_idx").on(table.userId, table.problemId),
         index("submissions_queue_idx").on(table.verdict, table.createdAt),
+    ],
+);
+
+export const submissionRecommendations = pgTable(
+    "submission_recommendations",
+    {
+        submissionId: uuid("submission_id")
+            .notNull()
+            .references(() => submissions.id, { onDelete: "cascade" }),
+        userId: uuid("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.submissionId, table.userId] }),
+        index("submission_recommendations_submission_idx").on(table.submissionId),
+    ],
+);
+
+export const submissionComments = pgTable(
+    "submission_comments",
+    {
+        id: uuid("id").primaryKey().defaultRandom(),
+        submissionId: uuid("submission_id")
+            .notNull()
+            .references(() => submissions.id, { onDelete: "cascade" }),
+        userId: uuid("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        body: text("body").notNull(),
+        ...timestamps,
+    },
+    (table) => [
+        index("submission_comments_submission_idx").on(table.submissionId, table.createdAt),
     ],
 );
 
@@ -289,6 +346,8 @@ export const auditLogs = pgTable(
 
 export const userRelations = relations(users, ({ many }) => ({
     submissions: many(submissions),
+    submissionRecommendations: many(submissionRecommendations),
+    submissionComments: many(submissionComments),
     assignments: many(assignments),
     gradeEvents: many(gradeEvents),
 }));
@@ -296,4 +355,10 @@ export const problemRelations = relations(problems, ({ many }) => ({
     submissions: many(submissions),
     tests: many(testCases),
     assignments: many(assignments),
+}));
+export const submissionRelations = relations(submissions, ({ one, many }) => ({
+    user: one(users, { fields: [submissions.userId], references: [users.id] }),
+    problem: one(problems, { fields: [submissions.problemId], references: [problems.id] }),
+    recommendations: many(submissionRecommendations),
+    comments: many(submissionComments),
 }));
