@@ -1,5 +1,6 @@
 import type { Grade } from "./grade-policy";
 import { canAccessProblem } from "./grade-policy";
+import { dayjs } from "../lib/dayjs-config";
 
 export type AssignmentCandidate = {
     id: string;
@@ -28,15 +29,10 @@ export function chooseNextProblem(
         (problem) => !problem.secondaryTags.some((tag) => previous?.secondaryTags.includes(tag)),
     );
     const newest = (items: AssignmentCandidate[]) =>
-        [...items].sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())[0];
+        [...items].sort((a, b) => dayjs(b.publishedAt).diff(dayjs(a.publishedAt)))[0];
     return newest(differentPrimary) ?? newest(differentSecondary) ?? newest(available) ?? null;
 }
 
 export function kstDayKey(date: Date) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Seoul",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(date);
+    return dayjs(date).tz().format("YYYY-MM-DD");
 }

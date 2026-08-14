@@ -1,17 +1,20 @@
+import { dayjs } from "../lib/dayjs-config";
+
 export type Grade = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export const PROMOTION_THRESHOLDS = [
-    { from: 9, to: 8, cumulative: 3, interval: 3 },
-    { from: 8, to: 7, cumulative: 6, interval: 3 },
-    { from: 7, to: 6, cumulative: 9, interval: 3 },
-    { from: 6, to: 5, cumulative: 15, interval: 6 },
-    { from: 5, to: 4, cumulative: 21, interval: 6 },
-    { from: 4, to: 3, cumulative: 27, interval: 6 },
-    { from: 3, to: 2, cumulative: 33, interval: 6 },
-    { from: 2, to: 1, cumulative: 42, interval: 9 },
+    { from: 9, to: 8, cumulative: 5, interval: 5 },
+    { from: 8, to: 7, cumulative: 10, interval: 5 },
+    { from: 7, to: 6, cumulative: 15, interval: 5 },
+    { from: 6, to: 5, cumulative: 25, interval: 10 },
+    { from: 5, to: 4, cumulative: 35, interval: 10 },
+    { from: 4, to: 3, cumulative: 50, interval: 15 },
+    { from: 3, to: 2, cumulative: 65, interval: 15 },
+    { from: 2, to: 1, cumulative: 85, interval: 20 },
 ] as const;
 
-export const CHAMPIONS_THRESHOLD = 52;
+export const LEAGUE_TICKET_INTERVAL = 30;
+export const CHAMPIONS_THRESHOLD = 115;
 export const INACTIVITY_DAYS = 14;
 
 export function canAccessProblem(userGrade: Grade, problemGrade: Grade) {
@@ -50,7 +53,7 @@ export function applyFirstAccepted(
     while (next.grade > 1) {
         const rule = PROMOTION_THRESHOLDS.find((candidate) => candidate.from === next.grade)!;
         // A demotion establishes a new checkpoint: the interval must be earned again.
-        const required = Math.max(rule.cumulative, next.checkpoint + rule.interval);
+        const required = next.checkpoint + rule.interval;
         if (next.verifiedSolves < required) break;
         const fromGrade = next.grade;
         next = { ...next, grade: rule.to as Grade, checkpoint: next.verifiedSolves };
@@ -58,7 +61,7 @@ export function applyFirstAccepted(
     }
 
     if (next.grade === 1 && !next.championsEligible) {
-        const required = Math.max(CHAMPIONS_THRESHOLD, next.checkpoint + 10);
+        const required = next.checkpoint + LEAGUE_TICKET_INTERVAL;
         if (next.verifiedSolves >= required) {
             next = { ...next, championsEligible: true, checkpoint: next.verifiedSolves };
             events.push({ kind: "CHAMPIONS_ELIGIBLE", fromGrade: 1, toGrade: 1, at });
@@ -70,8 +73,8 @@ export function applyFirstAccepted(
 
 export function applyInactivity(state: GradeState, now: Date, joinedAt: Date) {
     const anchor = state.lastDemotedAt ?? state.lastFirstAcceptedAt ?? joinedAt;
-    const elapsed = now.getTime() - anchor.getTime();
-    if (elapsed < INACTIVITY_DAYS * 86_400_000 || state.grade === 9)
+    const elapsedDays = dayjs(now).diff(dayjs(anchor), "day", true);
+    if (elapsedDays < INACTIVITY_DAYS || state.grade === 9)
         return { state, events: [] as GradeEvent[] };
 
     if (state.grade === 1 && state.championsEligible) {
@@ -108,15 +111,17 @@ export function applyInactivity(state: GradeState, now: Date, joinedAt: Date) {
 
 export function gradeProgress(state: GradeState) {
     if (state.grade === 1) {
-        const start = state.championsEligible
-            ? state.verifiedSolves
-            : Math.max(42, state.checkpoint);
-        return { current: state.verifiedSolves - start, required: 10, label: "챔피언스 출전 자격" };
+        return {
+            current: state.championsEligible
+                ? LEAGUE_TICKET_INTERVAL
+                : Math.max(0, state.verifiedSolves - state.checkpoint),
+            required: LEAGUE_TICKET_INTERVAL,
+            label: state.championsEligible ? "리그 참가권 획득" : "리그 참가권",
+        };
     }
     const rule = PROMOTION_THRESHOLDS.find((candidate) => candidate.from === state.grade)!;
-    const start = Math.max(rule.cumulative - rule.interval, state.checkpoint);
     return {
-        current: Math.max(0, state.verifiedSolves - start),
+        current: Math.max(0, state.verifiedSolves - state.checkpoint),
         required: rule.interval,
         label: `${rule.to}급`,
     };

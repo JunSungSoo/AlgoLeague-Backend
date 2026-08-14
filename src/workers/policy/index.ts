@@ -3,8 +3,9 @@ import { db } from "../../db";
 import { assignments, gradeEvents, problems, solvedProblems, users } from "../../db/schema";
 import { chooseNextProblem, kstDayKey } from "../../domain/assignment-policy";
 import { applyInactivity, type Grade, type GradeState } from "../../domain/grade-policy";
+import { dayjs } from "../../lib/dayjs-config";
 
-async function runPolicies(now = new Date()) {
+async function runPolicies(now = dayjs().toDate()) {
     const learners = await db.select().from(users);
     const catalog = await db.select().from(problems).where(eq(problems.status, "PUBLISHED"));
     for (const user of learners)

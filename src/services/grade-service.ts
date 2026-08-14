@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db/index";
 import { applyFirstAccepted, type GradeState } from "../domain/grade-policy";
+import { dayjs } from "../lib/dayjs-config";
 
 export async function recordAcceptedSubmission(submissionId: string) {
     const client = await pool.connect();
@@ -33,7 +34,7 @@ export async function recordAcceptedSubmission(submissionId: string) {
             [row.user_id, row.problem_id],
         );
         const user = await loadUserForUpdate(client, row.user_id);
-        const result = applyFirstAccepted(user, new Date());
+        const result = applyFirstAccepted(user, dayjs().toDate());
         await client.query("UPDATE submissions SET first_accepted=true WHERE id=$1", [
             submissionId,
         ]);

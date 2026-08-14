@@ -10,6 +10,7 @@ import {
     type PhoneVerificationPurpose,
 } from "./auth";
 import { hashPassword, verifyPassword } from "../services/password";
+import { dayjs } from "../lib/dayjs-config";
 
 const languageSchema = z.enum(["python", "java", "javascript", "cpp"]);
 const phoneSchema = z
@@ -120,9 +121,7 @@ function publicUser(user: PublicUserSource) {
 }
 function nextNicknameChange(changedAt: Date | null) {
     if (!changedAt) return null;
-    const availableAt = new Date(changedAt);
-    availableAt.setUTCMonth(availableAt.getUTCMonth() + 1);
-    return availableAt;
+    return dayjs(changedAt).add(1, "month").toDate();
 }
 async function findUserByPhone(phone: string) {
     if (!process.env.DATABASE_URL) return previewUsers.get(phone) ?? null;
@@ -200,7 +199,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             return reply.code(404).send({ error: "아이디와 휴대폰 번호가 일치하지 않습니다." });
         const rateKey = `${parsed.data.purpose}:${parsed.data.phone}`;
         const lastRequested = recentRequests.get(rateKey) ?? 0;
-        if (Date.now() - lastRequested < 60_000)
+        if (dayjs().valueOf() - lastRequested < 60_000)
             return reply.code(429).send({ error: "인증번호는 1분 후 다시 요청할 수 있습니다." });
         const code =
             process.env.NODE_ENV === "production" ? String(randomInt(100000, 1000000)) : "123456";
@@ -210,10 +209,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             purpose: parsed.data.purpose,
             username: parsed.data.username,
             codeHash: hash(code),
-            expiresAt: Date.now() + 5 * 60_000,
+            expiresAt: dayjs().add(5, "minute").valueOf(),
             attempts: 0,
         });
-        recentRequests.set(rateKey, Date.now());
+        recentRequests.set(rateKey, dayjs().valueOf());
         if (process.env.NODE_ENV === "production") {
             try {
                 const smsResponse = await fetch(process.env.SMS_WEBHOOK_URL!, {
@@ -251,7 +250,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         if (!parsed.success)
             return reply.code(400).send({ error: "인증번호 6자리를 확인해 주세요." });
         const challenge = challenges.get(parsed.data.challengeId);
-        if (!challenge || challenge.expiresAt < Date.now()) {
+        if (!challenge || challenge.expiresAt < dayjs().valueOf()) {
             challenges.delete(parsed.data.challengeId);
             return reply
                 .code(410)
@@ -367,7 +366,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                     passwordHash,
                     name: parsed.data.name,
                     phone,
-                    phoneVerifiedAt: new Date(),
+                    phoneVerifiedAt: dayjs().toDate(),
                     nickname: parsed.data.nickname,
                     address: parsed.data.address || null,
                     preferredLanguage: parsed.data.preferredLanguage,
@@ -425,7 +424,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             const { users } = await import("../db/schema");
             await db
                 .update(users)
-                .set({ passwordHash, updatedAt: new Date() })
+                .set({ passwordHash, updatedAt: dayjs().toDate() })
                 .where(eq(users.id, user.id));
         }
         return { ok: true, message: "비밀번호가 변경되었습니다." };
@@ -438,9 +437,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         const availableAt = nextNicknameChange(user.nicknameChangedAt);
         return {
             user: publicUser(user),
-            nicknameChangedAt: user.nicknameChangedAt?.toISOString() ?? null,
-            nicknameChangeAvailableAt: availableAt?.toISOString() ?? null,
-            canChangeNickname: !availableAt || availableAt <= new Date(),
+            nicknameChangedAt: user.nicknameChangedAt
+                ? dayjs(user.nicknameChangedAt).toISOString()
+                : null,
+            nicknameChangeAvailableAt: availableAt ? dayjs(availableAt).toISOString() : null,
+            canChangeNickname: !availableAt || !dayjs(availableAt).isAfter(dayjs()),
         };
     });
     app.post("/api/profile/nickname", async (request, reply) => {
@@ -454,21 +455,20 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         if (user.nickname === parsed.data.nickname)
             return reply.code(400).send({ error: "현재 닉네임과 다른 닉네임을 입력해 주세요." });
         const availableAt = nextNicknameChange(user.nicknameChangedAt);
-        if (availableAt && availableAt > new Date())
+        if (availableAt && dayjs(availableAt).isAfter(dayjs()))
             return reply.code(429).send({
-                error: `닉네임은 ${availableAt.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })}부터 다시 변경할 수 있습니다.`,
-                nicknameChangeAvailableAt: availableAt.toISOString(),
+                error: `닉네임은 ${dayjs(availableAt).tz().format("YYYY. M. D.")}부터 다시 변경할 수 있습니다.`,
+                nicknameChangeAvailableAt: dayjs(availableAt).toISOString(),
             });
         if (await nicknameExists(parsed.data.nickname))
             return reply.code(409).send({ error: "이미 사용 중인 닉네임입니다." });
-        const changedAt = new Date();
+        const changedAt = dayjs().toDate();
         if (!process.env.DATABASE_URL) {
             user.nickname = parsed.data.nickname;
             user.nicknameChangedAt = changedAt;
         } else {
             try {
-                const cutoff = new Date(changedAt);
-                cutoff.setUTCMonth(cutoff.getUTCMonth() - 1);
+                const cutoff = dayjs(changedAt).subtract(1, "month").toDate();
                 const { db } = await import("../db/index");
                 const { users } = await import("../db/schema");
                 const updatedRows = await db
@@ -499,8 +499,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         const updated = { ...user, nickname: parsed.data.nickname };
         return {
             user: publicUser(updated),
-            nicknameChangedAt: changedAt.toISOString(),
-            nicknameChangeAvailableAt: nextNicknameChange(changedAt)!.toISOString(),
+            nicknameChangedAt: dayjs(changedAt).toISOString(),
+            nicknameChangeAvailableAt: dayjs(nextNicknameChange(changedAt)).toISOString(),
             canChangeNickname: false,
             message: "닉네임이 변경되었습니다.",
         };
@@ -537,7 +537,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             const { users } = await import("../db/schema");
             await db
                 .update(users)
-                .set({ passwordHash, updatedAt: new Date() })
+                .set({ passwordHash, updatedAt: dayjs().toDate() })
                 .where(eq(users.id, user.id));
         }
         return { ok: true, message: "비밀번호가 변경되었습니다." };
@@ -557,7 +557,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             const { users } = await import("../db/schema");
             await db
                 .update(users)
-                .set({ preferredLanguage: parsed.data.preferredLanguage, updatedAt: new Date() })
+                .set({
+                    preferredLanguage: parsed.data.preferredLanguage,
+                    updatedAt: dayjs().toDate(),
+                })
                 .where(eq(users.id, user.id));
         }
         return {
@@ -584,7 +587,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             const { users } = await import("../db/schema");
             await db
                 .update(users)
-                .set({ profileImageUrl: parsed.data.imageDataUrl, updatedAt: new Date() })
+                .set({ profileImageUrl: parsed.data.imageDataUrl, updatedAt: dayjs().toDate() })
                 .where(eq(users.id, user.id));
         }
         return {

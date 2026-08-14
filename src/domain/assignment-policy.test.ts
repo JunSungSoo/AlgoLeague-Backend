@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { chooseNextProblem, kstDayKey } from "./assignment-policy";
+import { dayjs } from "../lib/dayjs-config";
 describe("assignment policy", () => {
     it("prefers a different primary concept", () => {
-        const now = new Date();
+        const now = dayjs().toDate();
         const candidates = [
             {
                 id: "same",
@@ -16,7 +17,7 @@ describe("assignment policy", () => {
                 grade: 7 as const,
                 primaryTag: "stack",
                 secondaryTags: [],
-                publishedAt: new Date(0),
+                publishedAt: dayjs(0).toDate(),
             },
         ];
         expect(
@@ -30,6 +31,6 @@ describe("assignment policy", () => {
         ).toBe("different");
     });
     it("uses KST day boundaries", () => {
-        expect(kstDayKey(new Date("2026-08-10T15:00:00Z"))).toBe("2026-08-11");
+        expect(kstDayKey(dayjs("2026-08-10T15:00:00Z").toDate())).toBe("2026-08-11");
     });
 });
