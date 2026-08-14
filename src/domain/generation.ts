@@ -22,6 +22,7 @@ export const rejectedGenerationStates = [
     "REJECTED_WEAK_TESTS",
     "REJECTED_DUPLICATE",
     "REJECTED_AMBIGUOUS",
+    "REJECTED_REVIEW",
 ] as const;
 
 export const problemPackageSchema = z.object({
@@ -54,15 +55,17 @@ export function requiresHumanReview(grade: number, champions = false) {
     return champions || grade === 1;
 }
 
-export type AutomaticPublicationReport = {
-    schema: boolean;
-    samples: boolean;
-    crossLanguage: boolean;
-    mutationScore: number;
-    duplicateScore: number;
-    ambiguityScore: number;
-    failures: string[];
-};
+export const automaticPublicationReportSchema = z.object({
+    schema: z.boolean(),
+    samples: z.boolean(),
+    crossLanguage: z.boolean(),
+    mutationScore: z.number().min(0).max(1),
+    duplicateScore: z.number().min(0).max(1),
+    ambiguityScore: z.number().min(0).max(1),
+    failures: z.array(z.string()),
+});
+
+export type AutomaticPublicationReport = z.infer<typeof automaticPublicationReportSchema>;
 
 export function canAutoPublish(
     grade: number,

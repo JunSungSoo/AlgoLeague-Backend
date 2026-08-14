@@ -1,7 +1,13 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { generationJobs, problems, testCases } from "../../db/schema";
-import { canAutoPublish, requiresHumanReview, type ProblemPackage } from "../../domain/generation";
+import { auditLogs, generationJobs, problems, testCases } from "../../db/schema";
+import {
+    automaticPublicationReportSchema,
+    canAutoPublish,
+    problemPackageSchema,
+    requiresHumanReview,
+    type ProblemPackage,
+} from "../../domain/generation";
 import type { ValidationReport } from "./validator";
 import { problemFingerprint, problemTitleKey } from "../../domain/problem-identity";
 import { dayjs } from "../../lib/dayjs-config";
@@ -65,6 +71,7 @@ export async function completeGenerationJob(
                 state: "REVIEW_REQUIRED",
                 package: candidate,
                 report,
+                model: provider && model ? `${provider}:${model}` : (model ?? "unknown"),
                 failureReason: null,
                 updatedAt: dayjs().toDate(),
             })
@@ -80,11 +87,87 @@ export async function completeGenerationJob(
         );
         return "REJECTED_WEAK_TESTS" as const;
     }
+    const publication = await publishGenerationCandidate(id, candidate, report, {
+        provider,
+        model,
+    });
+    return publication.state;
+}
+
+export async function publishReviewedGenerationJob(id: string, actorId: string) {
+    const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, id)).limit(1);
+    if (!job) return { state: "NOT_FOUND" as const };
+    if (job.state !== "REVIEW_REQUIRED") return { state: "NOT_REVIEWABLE" as const };
+    const candidate = problemPackageSchema.safeParse(job.package);
+    const report = automaticPublicationReportSchema.safeParse(job.report);
+    if (!candidate.success || !report.success) return { state: "INVALID_PACKAGE" as const };
+    return publishGenerationCandidate(id, candidate.data, report.data, {
+        actorId,
+        expectedState: "REVIEW_REQUIRED",
+        model: job.model,
+    });
+}
+
+export async function rejectReviewedGenerationJob(id: string, actorId: string, reason: string) {
+    return db.transaction(async (tx) => {
+        const now = dayjs().toDate();
+        const [rejected] = await tx
+            .update(generationJobs)
+            .set({
+                state: "REJECTED_REVIEW",
+                failureReason: reason,
+                updatedAt: now,
+            })
+            .where(and(eq(generationJobs.id, id), eq(generationJobs.state, "REVIEW_REQUIRED")))
+            .returning({ id: generationJobs.id });
+        if (!rejected) return false;
+        await tx.insert(auditLogs).values({
+            actorId,
+            action: "GENERATION_REVIEW_REJECTED",
+            targetType: "generation_job",
+            targetId: id,
+            metadata: { reason },
+        });
+        return true;
+    });
+}
+
+type PublicationOptions = {
+    actorId?: string;
+    expectedState?: "REVIEW_REQUIRED";
+    provider?: string;
+    model?: string;
+};
+type PublicationResult = {
+    state: "PUBLISHED" | "REJECTED_DUPLICATE" | "NOT_REVIEWABLE";
+    problemId?: string;
+};
+
+async function publishGenerationCandidate(
+    id: string,
+    candidate: ProblemPackage,
+    report: ValidationReport,
+    options: PublicationOptions = {},
+): Promise<PublicationResult> {
     const fingerprint = problemFingerprint(candidate);
     const titleKey = problemTitleKey(candidate.title);
-    let finalState: "PUBLISHED" | "REJECTED_DUPLICATE" = "PUBLISHED";
+    let finalState: "PUBLISHED" | "REJECTED_DUPLICATE" | "NOT_REVIEWABLE" = "PUBLISHED";
+    let publishedProblemId: string | undefined;
     await db.transaction(async (tx) => {
         const now = dayjs().toDate();
+        if (options.expectedState) {
+            const [claimed] = await tx
+                .update(generationJobs)
+                .set({ state: "APPROVED", failureReason: null, updatedAt: now })
+                .where(
+                    and(eq(generationJobs.id, id), eq(generationJobs.state, options.expectedState)),
+                )
+                .returning({ id: generationJobs.id });
+            if (!claimed) {
+                finalState = "NOT_REVIEWABLE";
+                return;
+            }
+        }
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${fingerprint}))`);
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${titleKey}))`);
         const [duplicate] = await tx
@@ -112,6 +195,14 @@ export async function completeGenerationJob(
                     updatedAt: now,
                 })
                 .where(eq(generationJobs.id, id));
+            if (options.actorId)
+                await tx.insert(auditLogs).values({
+                    actorId: options.actorId,
+                    action: "GENERATION_REVIEW_REJECTED_DUPLICATE",
+                    targetType: "generation_job",
+                    targetId: id,
+                    metadata: { duplicateProblemId: duplicate.id },
+                });
             return;
         }
         const slug = `generated-${candidate.grade}-${id}`;
@@ -135,7 +226,8 @@ export async function completeGenerationJob(
                 contentFingerprint: fingerprint,
                 publishedAt: now,
             })
-            .returning({ id: problems.id });
+            .returning({ id: problems.id, slug: problems.slug });
+        publishedProblemId = problem.id;
         await tx.insert(testCases).values([
             ...candidate.samples.map((sample, index) => ({
                 problemId: problem.id,
@@ -162,13 +254,24 @@ export async function completeGenerationJob(
             .update(generationJobs)
             .set({
                 state: "PUBLISHED",
-                model: provider && model ? `${provider}:${model}` : (model ?? "unknown"),
+                model:
+                    options.provider && options.model
+                        ? `${options.provider}:${options.model}`
+                        : (options.model ?? "unknown"),
                 package: candidate,
                 report,
                 failureReason: null,
                 updatedAt: now,
             })
             .where(eq(generationJobs.id, id));
+        if (options.actorId)
+            await tx.insert(auditLogs).values({
+                actorId: options.actorId,
+                action: "GENERATION_REVIEW_APPROVED",
+                targetType: "generation_job",
+                targetId: id,
+                metadata: { problemId: problem.id, slug: problem.slug },
+            });
     });
-    return finalState;
+    return { state: finalState, problemId: publishedProblemId };
 }

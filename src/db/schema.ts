@@ -55,6 +55,7 @@ export const generationStateEnum = pgEnum("generation_state", [
     "REJECTED_WEAK_TESTS",
     "REJECTED_DUPLICATE",
     "REJECTED_AMBIGUOUS",
+    "REJECTED_REVIEW",
 ]);
 
 const timestamps = {

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."generation_state" ADD VALUE 'REJECTED_REVIEW';

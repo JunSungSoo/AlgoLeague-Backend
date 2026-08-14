@@ -1,17 +1,9 @@
-import type { ProblemPackage } from "../../domain/generation";
+import type { AutomaticPublicationReport, ProblemPackage } from "../../domain/generation";
 import { buildFunctionHarness, expectedFunctionOutput } from "../../domain/function-spec";
 import { compareOutput, type JudgeLanguage } from "../../domain/judge";
 import { runSandbox } from "../judge/sandbox";
 
-export type ValidationReport = {
-    schema: boolean;
-    samples: boolean;
-    crossLanguage: boolean;
-    mutationScore: number;
-    duplicateScore: number;
-    ambiguityScore: number;
-    failures: string[];
-};
+export type ValidationReport = AutomaticPublicationReport;
 
 export async function validatePackage(candidate: ProblemPackage): Promise<ValidationReport> {
     const failures: string[] = [];

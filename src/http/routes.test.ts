@@ -25,7 +25,7 @@ describe("backend API", () => {
         expect(response.json().service).toBe("algorithm-champions-back");
     });
     it("rejects protected APIs without a session", async () => {
-        const [problems, ranking, progress, submission] = await Promise.all([
+        const [problems, ranking, progress, submission, reviews] = await Promise.all([
             app.inject({ method: "GET", url: "/api/problems" }),
             app.inject({ method: "GET", url: "/api/rankings/6" }),
             app.inject({ method: "GET", url: "/api/grade-progress" }),
@@ -34,11 +34,13 @@ describe("backend API", () => {
                 url: "/api/problems/minimum-route/submit",
                 payload: { language: "python", code: "print(1)" },
             }),
+            app.inject({ method: "GET", url: "/api/admin/problem-reviews" }),
         ]);
         expect(problems.statusCode).toBe(403);
         expect(ranking.statusCode).toBe(401);
         expect(progress.statusCode).toBe(401);
         expect(submission.statusCode).toBe(403);
+        expect(reviews.statusCode).toBe(403);
     });
     it("requires a session and database for the real dashboard", async () => {
         const guest = await app.inject({ method: "GET", url: "/api/dashboard" });
@@ -58,6 +60,24 @@ describe("backend API", () => {
             app.inject({ method: "GET", url: "/api/rankings/6", headers: auth() }),
             app.inject({ method: "GET", url: "/api/grade-progress", headers: auth() }),
             app.inject({ method: "GET", url: "/api/admin/overview", headers: auth() }),
+            app.inject({ method: "GET", url: "/api/admin/problem-reviews", headers: auth() }),
+            app.inject({
+                method: "GET",
+                url: "/api/admin/problem-reviews/example",
+                headers: auth(),
+            }),
+            app.inject({
+                method: "POST",
+                url: "/api/admin/problem-reviews/example/approve",
+                headers: auth(),
+                payload: { confirmed: true },
+            }),
+            app.inject({
+                method: "POST",
+                url: "/api/admin/problem-reviews/example/reject",
+                headers: auth(),
+                payload: { reason: "검수 기준 미충족" },
+            }),
             app.inject({ method: "GET", url: "/api/submissions/example/status", headers: auth() }),
             app.inject({
                 method: "GET",
@@ -66,8 +86,26 @@ describe("backend API", () => {
             }),
         ]);
         expect(responses.map((response) => response.statusCode)).toEqual([
-            503, 503, 503, 503, 503, 503, 503, 503,
+            503, 503, 503, 503, 503, 503, 503, 503, 503, 503, 503, 503,
         ]);
+    });
+    it("validates problem review decisions before database access", async () => {
+        const [approve, reject] = await Promise.all([
+            app.inject({
+                method: "POST",
+                url: "/api/admin/problem-reviews/example/approve",
+                headers: auth(),
+                payload: { confirmed: false },
+            }),
+            app.inject({
+                method: "POST",
+                url: "/api/admin/problem-reviews/example/reject",
+                headers: auth(),
+                payload: { reason: "짧음" },
+            }),
+        ]);
+        expect(approve.statusCode).toBe(400);
+        expect(reject.statusCode).toBe(400);
     });
     it("validates grade params for authenticated users", async () => {
         const response = await app.inject({

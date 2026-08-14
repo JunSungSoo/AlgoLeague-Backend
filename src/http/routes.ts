@@ -55,6 +55,8 @@ const completionQuerySchema = z.object({
     sort: z.enum(["recommended", "latest", "comments"]).default("recommended"),
     page: z.coerce.number().int().min(1).default(1),
 });
+const reviewApproveSchema = z.object({ confirmed: z.literal(true) });
+const reviewRejectSchema = z.object({ reason: z.string().trim().min(5).max(500) });
 
 export async function registerRoutes(app: FastifyInstance) {
     await registerAuthRoutes(app);
@@ -681,6 +683,149 @@ export async function registerRoutes(app: FastifyInstance) {
             }),
         };
     });
+    app.get("/api/admin/problem-reviews", async (request, reply) => {
+        const session = await requireScope(request, "admin:write");
+        if (!session) return reply.code(403).send({ error: "관리자 권한이 필요합니다." });
+        if (!process.env.DATABASE_URL)
+            return reply.code(503).send({ error: "문제 검수 목록에는 DATABASE_URL이 필요합니다." });
+        const { db } = await import("../db/index");
+        const { generationJobs } = await import("../db/schema");
+        const { problemPackageSchema, automaticPublicationReportSchema } =
+            await import("../domain/generation");
+        const rows = await db
+            .select()
+            .from(generationJobs)
+            .where(eq(generationJobs.state, "REVIEW_REQUIRED"))
+            .orderBy(asc(generationJobs.createdAt));
+        return {
+            items: rows.map((row) => {
+                const candidate = problemPackageSchema.safeParse(row.package);
+                const report = automaticPublicationReportSchema.safeParse(row.report);
+                return {
+                    id: row.id,
+                    title: candidate.success ? candidate.data.title : "검수 데이터 오류",
+                    grade: row.grade,
+                    primaryTag: candidate.success ? candidate.data.primaryTag : "-",
+                    secondaryTags: candidate.success ? candidate.data.secondaryTags : [],
+                    mutationScore: report.success ? report.data.mutationScore : null,
+                    duplicateScore: report.success ? report.data.duplicateScore : null,
+                    ambiguityScore: report.success ? report.data.ambiguityScore : null,
+                    model: row.model,
+                    createdAt: dayjs(row.createdAt).toISOString(),
+                    updatedAt: dayjs(row.updatedAt).toISOString(),
+                    valid: candidate.success && report.success,
+                };
+            }),
+        };
+    });
+    app.get<{ Params: { id: string } }>(
+        "/api/admin/problem-reviews/:id",
+        async (request, reply) => {
+            const session = await requireScope(request, "admin:write");
+            if (!session) return reply.code(403).send({ error: "관리자 권한이 필요합니다." });
+            if (!process.env.DATABASE_URL)
+                return reply
+                    .code(503)
+                    .send({ error: "문제 검수 상세에는 DATABASE_URL이 필요합니다." });
+            const { db } = await import("../db/index");
+            const { generationJobs } = await import("../db/schema");
+            const { problemPackageSchema, automaticPublicationReportSchema } =
+                await import("../domain/generation");
+            const [row] = await db
+                .select()
+                .from(generationJobs)
+                .where(eq(generationJobs.id, request.params.id))
+                .limit(1);
+            if (!row) return reply.code(404).send({ error: "검수 문제를 찾을 수 없습니다." });
+            if (row.state !== "REVIEW_REQUIRED")
+                return reply.code(409).send({ error: "이미 검수가 완료된 문제입니다." });
+            const candidate = problemPackageSchema.safeParse(row.package);
+            const report = automaticPublicationReportSchema.safeParse(row.report);
+            if (!candidate.success || !report.success)
+                return {
+                    review: {
+                        id: row.id,
+                        state: row.state,
+                        model: row.model,
+                        blueprintVersion: row.blueprintVersion,
+                        promptVersion: row.promptVersion,
+                        attempts: row.attempts,
+                        createdAt: dayjs(row.createdAt).toISOString(),
+                        updatedAt: dayjs(row.updatedAt).toISOString(),
+                        valid: false,
+                        validationError:
+                            "생성된 문제 패키지 또는 자동 검증 결과가 누락되었거나 올바르지 않습니다.",
+                        problem: null,
+                        report: null,
+                    },
+                };
+            return {
+                review: {
+                    id: row.id,
+                    state: row.state,
+                    model: row.model,
+                    blueprintVersion: row.blueprintVersion,
+                    promptVersion: row.promptVersion,
+                    attempts: row.attempts,
+                    createdAt: dayjs(row.createdAt).toISOString(),
+                    updatedAt: dayjs(row.updatedAt).toISOString(),
+                    valid: true,
+                    problem: candidate.data,
+                    report: report.data,
+                },
+            };
+        },
+    );
+    app.post<{ Params: { id: string } }>(
+        "/api/admin/problem-reviews/:id/approve",
+        async (request, reply) => {
+            const session = await requireScope(request, "admin:write");
+            if (!session) return reply.code(403).send({ error: "관리자 권한이 필요합니다." });
+            const parsed = reviewApproveSchema.safeParse(request.body);
+            if (!parsed.success)
+                return reply.code(400).send({ error: "검수 확인 후 승인할 수 있습니다." });
+            if (!process.env.DATABASE_URL)
+                return reply.code(503).send({ error: "문제 승인에는 DATABASE_URL이 필요합니다." });
+            const { publishReviewedGenerationJob } =
+                await import("../workers/generation/publisher");
+            const result = await publishReviewedGenerationJob(request.params.id, session.userId);
+            if (result.state === "NOT_FOUND")
+                return reply.code(404).send({ error: "검수 문제를 찾을 수 없습니다." });
+            if (result.state === "NOT_REVIEWABLE")
+                return reply.code(409).send({ error: "이미 검수가 완료된 문제입니다." });
+            if (result.state === "INVALID_PACKAGE")
+                return reply
+                    .code(422)
+                    .send({ error: "문제 데이터가 올바르지 않아 승인할 수 없습니다." });
+            if (result.state === "REJECTED_DUPLICATE")
+                return reply.code(409).send({ error: "기존 게시 문제와 중복되어 반려되었습니다." });
+            return {
+                state: result.state,
+                problemId: result.problemId,
+                message: "문제를 승인하고 게시했습니다.",
+            };
+        },
+    );
+    app.post<{ Params: { id: string } }>(
+        "/api/admin/problem-reviews/:id/reject",
+        async (request, reply) => {
+            const session = await requireScope(request, "admin:write");
+            if (!session) return reply.code(403).send({ error: "관리자 권한이 필요합니다." });
+            const parsed = reviewRejectSchema.safeParse(request.body);
+            if (!parsed.success)
+                return reply.code(400).send({ error: "반려 사유를 5자 이상 입력해 주세요." });
+            if (!process.env.DATABASE_URL)
+                return reply.code(503).send({ error: "문제 반려에는 DATABASE_URL이 필요합니다." });
+            const { rejectReviewedGenerationJob } = await import("../workers/generation/publisher");
+            const rejected = await rejectReviewedGenerationJob(
+                request.params.id,
+                session.userId,
+                parsed.data.reason,
+            );
+            if (!rejected) return reply.code(409).send({ error: "이미 검수가 완료된 문제입니다." });
+            return { state: "REJECTED_REVIEW", message: "문제를 반려했습니다." };
+        },
+    );
     app.post<{ Params: { id: string } }>("/api/problems/:id/run", async (request, reply) => {
         const session = await requireScope(request, "submission:write");
         if (!session) return reply.code(403).send({ error: "PC 웹 쓰기 권한이 필요합니다." });
