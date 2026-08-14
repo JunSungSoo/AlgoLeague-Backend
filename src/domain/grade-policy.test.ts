@@ -23,6 +23,11 @@ describe("grade policy", () => {
         expect(canAccessProblem(6, 9)).toBe(true);
         expect(canAccessProblem(6, 4)).toBe(false);
     });
+
+    it("allows administrators to access every problem grade", () => {
+        expect(canAccessProblem(9, 1, true)).toBe(true);
+        expect(canAccessProblem(1, 9, true)).toBe(true);
+    });
     it("promotes after five completed problems in grades 9 through 7", () => {
         let state = initial();
         for (let i = 0; i < 4; i++) state = applyFirstAccepted(state, dayjs().toDate()).state;

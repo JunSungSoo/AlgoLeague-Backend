@@ -77,6 +77,7 @@ export async function registerRoutes(app: FastifyInstance) {
             .where(eq(users.id, session.userId))
             .limit(1);
         if (!user) return reply.code(404).send({ error: "회원 정보를 찾을 수 없습니다." });
+        const canAccessAllGrades = session.scopes.includes("admin:write");
         const [catalog, solved, submissionStats] = await Promise.all([
             db
                 .select({
@@ -127,13 +128,21 @@ export async function registerRoutes(app: FastifyInstance) {
         });
         return {
             userGrade: user.grade,
-            accessibleRange: { from: 9, to: Math.max(1, user.grade - 1) },
+            accessibleRange: {
+                from: 9,
+                to: canAccessAllGrades ? 1 : Math.max(1, user.grade - 1),
+            },
+            canAccessAllGrades,
             items: uniqueCatalog.map(({ id, ...problem }) => {
                 const stat = stats.get(id);
                 return {
                     ...problem,
                     solved: solvedIds.has(id),
-                    accessible: canAccessProblem(user.grade as Grade, problem.grade as Grade),
+                    accessible: canAccessProblem(
+                        user.grade as Grade,
+                        problem.grade as Grade,
+                        canAccessAllGrades,
+                    ),
                     acceptanceRate: stat?.total
                         ? Math.round((stat.accepted / stat.total) * 100)
                         : null,
@@ -268,7 +277,14 @@ export async function registerRoutes(app: FastifyInstance) {
                 ),
         ]);
         const attempts = Number(attemptRow?.value ?? 0);
-        if (!canAccessProblem(user.grade as Grade, problem.grade as Grade) && attempts === 0)
+        if (
+            !canAccessProblem(
+                user.grade as Grade,
+                problem.grade as Grade,
+                session.scopes.includes("admin:write"),
+            ) &&
+            attempts === 0
+        )
             return reply
                 .code(403)
                 .send({ error: `현재 ${user.grade}급에서는 이 문제에 접근할 수 없습니다.` });
@@ -674,14 +690,32 @@ export async function registerRoutes(app: FastifyInstance) {
         if (!process.env.DATABASE_URL)
             return reply.code(503).send({ error: "예제 실행에는 DATABASE_URL이 필요합니다." });
         const { db } = await import("../db/index");
-        const { problems, testCases } = await import("../db/schema");
-        const [problem] = await db
-            .select()
-            .from(problems)
-            .where(and(eq(problems.slug, request.params.id), eq(problems.status, "PUBLISHED")))
-            .orderBy(desc(problems.version))
-            .limit(1);
+        const { problems, testCases, users } = await import("../db/schema");
+        const [[user], [problem]] = await Promise.all([
+            db
+                .select({ grade: users.grade })
+                .from(users)
+                .where(eq(users.id, session.userId))
+                .limit(1),
+            db
+                .select()
+                .from(problems)
+                .where(and(eq(problems.slug, request.params.id), eq(problems.status, "PUBLISHED")))
+                .orderBy(desc(problems.version))
+                .limit(1),
+        ]);
+        if (!user) return reply.code(404).send({ error: "회원 정보를 찾을 수 없습니다." });
         if (!problem) return reply.code(404).send({ error: "게시 중인 문제를 찾을 수 없습니다." });
+        if (
+            !canAccessProblem(
+                user.grade as Grade,
+                problem.grade as Grade,
+                session.scopes.includes("admin:write"),
+            )
+        )
+            return reply
+                .code(403)
+                .send({ error: `현재 ${user.grade}급에서는 이 문제를 실행할 수 없습니다.` });
         const samples = await db
             .select()
             .from(testCases)
@@ -752,13 +786,32 @@ export async function registerRoutes(app: FastifyInstance) {
                 message: "제출이 채점 큐에 등록되었습니다. (개발 미리보기)",
             });
         const { db } = await import("../db/index");
-        const { problems, submissions } = await import("../db/schema");
-        const [problem] = await db
-            .select()
-            .from(problems)
-            .where(and(eq(problems.slug, request.params.id), eq(problems.status, "PUBLISHED")))
-            .limit(1);
+        const { problems, submissions, users } = await import("../db/schema");
+        const [[user], [problem]] = await Promise.all([
+            db
+                .select({ grade: users.grade })
+                .from(users)
+                .where(eq(users.id, session.userId))
+                .limit(1),
+            db
+                .select()
+                .from(problems)
+                .where(and(eq(problems.slug, request.params.id), eq(problems.status, "PUBLISHED")))
+                .orderBy(desc(problems.version))
+                .limit(1),
+        ]);
+        if (!user) return reply.code(404).send({ error: "회원 정보를 찾을 수 없습니다." });
         if (!problem) return reply.code(404).send({ error: "게시 중인 문제를 찾을 수 없습니다." });
+        if (
+            !canAccessProblem(
+                user.grade as Grade,
+                problem.grade as Grade,
+                session.scopes.includes("admin:write"),
+            )
+        )
+            return reply
+                .code(403)
+                .send({ error: `현재 ${user.grade}급에서는 이 문제를 제출할 수 없습니다.` });
         const [{ value: attempts }] = await db
             .select({ value: count() })
             .from(submissions)

@@ -17,8 +17,12 @@ export const LEAGUE_TICKET_INTERVAL = 30;
 export const CHAMPIONS_THRESHOLD = 115;
 export const INACTIVITY_DAYS = 14;
 
-export function canAccessProblem(userGrade: Grade, problemGrade: Grade) {
-    return problemGrade >= Math.max(1, userGrade - 1);
+export function canAccessProblem(
+    userGrade: Grade,
+    problemGrade: Grade,
+    canAccessAllGrades = false,
+) {
+    return canAccessAllGrades || problemGrade >= Math.max(1, userGrade - 1);
 }
 
 export function submissionLimit(grade: Grade, champions = false) {
