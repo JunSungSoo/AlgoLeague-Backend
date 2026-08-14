@@ -17,6 +17,7 @@
         "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
         "worker:judge": "tsx --env-file-if-exists=.env src/workers/judge/index.ts",
         "worker:generation": "tsx --env-file-if-exists=.env src/workers/generation/index.ts",
+        "worker:generation:batch": "tsx --env-file-if-exists=.env src/workers/generation/generate-grade-batch.ts",
         "worker:policy": "tsx --env-file-if-exists=.env src/workers/policy/index.ts"
     },
     "engines": {

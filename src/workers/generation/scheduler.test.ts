@@ -19,6 +19,14 @@ describe("tiered generation schedule", () => {
         expect(generationBlueprint(1)).toContain("국제 대회 결승 수준");
     });
 
+    it("maps every grade to a research-calibrated difficulty rubric", () => {
+        for (let grade = 1; grade <= 9; grade++)
+            expect(generationBlueprint(grade)).toContain(`grade-${grade}`);
+        expect(generationBlueprint(9)).toContain("LeetCode Easy");
+        expect(generationBlueprint(5)).toContain("LeetCode Medium");
+        expect(generationBlueprint(1)).toContain("LeetCode Hard");
+    });
+
     it("calculates weekday and due time in KST", () => {
         const schedule = generationSchedule(dayjs("2026-08-15T15:06:00Z").toDate());
         expect(schedule.day).toBe("2026-08-16");

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { problemPackageSchema, type ProblemPackage } from "../../domain/generation";
+import { curatedCandidate } from "./curated-candidates";
 
 export type GenerationRequest = {
     grade: number;
@@ -7,14 +8,20 @@ export type GenerationRequest = {
     blueprintVersion: string;
     seed: number;
 };
-export type GenerationProvider = "openai" | "openrouter" | "ollama" | "rule";
+export type GenerationProvider = "openai" | "openrouter" | "ollama" | "curated" | "rule";
 export type GeneratedCandidate = {
     candidate: ProblemPackage;
     provider: GenerationProvider;
     model: string;
 };
 
-const providerNames = new Set<GenerationProvider>(["openai", "openrouter", "ollama", "rule"]);
+const providerNames = new Set<GenerationProvider>([
+    "openai",
+    "openrouter",
+    "ollama",
+    "curated",
+    "rule",
+]);
 
 export async function generateCandidate(
     request: GenerationRequest,
@@ -22,9 +29,7 @@ export async function generateCandidate(
 ): Promise<GeneratedCandidate> {
     const configured = providerOrder();
     const gradeProviders =
-        request.grade === 1
-            ? configured.filter((provider) => provider !== "rule")
-            : configured;
+        request.grade === 1 ? configured.filter((provider) => provider !== "rule") : configured;
     const providers = gradeProviders.filter((provider) => !excluded.has(provider));
     const failures: string[] = [];
 
@@ -40,15 +45,19 @@ export async function generateCandidate(
             }
             if (provider === "openrouter") {
                 if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY 미설정");
-                const model =
-                    process.env.OPENROUTER_MODEL ??
-                    "openai/gpt-oss-20b:free";
+                const model = process.env.OPENROUTER_MODEL ?? "openai/gpt-oss-20b:free";
                 return { candidate: await generateWithOpenRouter(request, model), provider, model };
             }
             if (provider === "ollama") {
                 const model = process.env.OLLAMA_MODEL ?? "qwen3:8b";
                 return { candidate: await generateWithOllama(request, model), provider, model };
             }
+            if (provider === "curated")
+                return {
+                    candidate: curatedCandidate(request),
+                    provider,
+                    model: "algoleague-curated-v1",
+                };
             return { candidate: ruleCandidate(request), provider, model: "algoleague-rule-v2" };
         } catch (error) {
             failures.push(
@@ -100,7 +109,7 @@ async function generateWithOpenRouter(request: GenerationRequest, model: string)
                 model,
                 messages: [{ role: "user", content: generationPrompt(request) }],
                 temperature: 0.2,
-                max_tokens: 32_000,
+                max_tokens: generationMaxTokens(),
                 response_format: {
                     type: "json_schema",
                     json_schema: {
@@ -109,6 +118,7 @@ async function generateWithOpenRouter(request: GenerationRequest, model: string)
                         schema: packageJsonSchema,
                     },
                 },
+                provider: { require_parameters: true },
             }),
             signal: AbortSignal.timeout(providerTimeout()),
         },
@@ -142,7 +152,7 @@ async function generateWithOllama(request: GenerationRequest, model: string) {
 }
 
 function generationPrompt(request: GenerationRequest) {
-    return `한국어 알고리즘 문제 패키지를 새로 작성하라. 등급은 ${request.grade}급, 설계는 ${request.blueprint}, 버전은 ${request.blueprintVersion}, 시드는 ${request.seed}이다. 알려진 문제의 문장·캐릭터·예제를 복제하지 말라. 설계에 명시된 알고리즘을 실제로 사용해야 하며 그보다 쉬운 단순 연산 문제로 낮추지 말라. title은 5자 이상, statement는 공백 포함 250자 이상의 완결된 한국어 설명, input과 output은 각각 30자 이상, explanation은 150자 이상 작성하라. 문제는 표준입출력 프로그램이 아니라 하나의 순수 함수를 완성하는 형식이어야 한다. functionSpec에 함수명·매개변수·반환형을 정의하고 Python, Java, JavaScript, C++23 solutions에는 해당 함수만 작성하라. main, 표준입력 읽기, 표준출력 코드는 포함하지 말라. samples는 정확히 3개를 만들고 각 테스트에 화면 표시용 input/output과 실행용 arguments/expected를 모두 넣어라. 경계값을 포함한 hiddenTests는 최소 8개 만들고 모든 반환값은 정확해야 한다. 각 언어 해답과 oracle은 모든 테스트에서 동일한 값을 반환해야 한다. generatorSeed와 blueprintVersion은 입력값을 그대로 사용하라. JSON 스키마만 출력하라.`;
+    return `한국어 알고리즘 문제 패키지를 새로 작성하라. 등급은 ${request.grade}급, 난이도 설계는 ${request.blueprint}, 버전은 ${request.blueprintVersion}, 시드는 ${request.seed}이다. Codewars와 LeetCode는 난이도 보정의 참고 체계일 뿐이며 해당 사이트를 포함한 기존 문제의 문장·서사·캐릭터·수치·예제·풀이 구조를 복제하거나 단순 변형하지 말라. 문제는 하나의 핵심 알고리즘 목표에 집중하고, 설계에 명시된 알고리즘과 사고 깊이를 실제로 요구해야 하며 더 쉬운 단순 연산이나 전수 조사로 낮아지면 안 된다. constraints에는 최대 입력 크기와 의도한 시간 복잡도가 왜 필요한지 판단할 수 있는 범위를 명시하고, explanation에는 핵심 불변식 또는 정당성 및 시간·공간 복잡도를 설명하라. title은 5자 이상, statement는 공백 포함 250자 이상의 완결된 한국어 설명, input과 output은 각각 30자 이상, explanation은 150자 이상 작성하라. 문제는 표준입출력 프로그램이 아니라 하나의 순수 함수를 완성하는 형식이어야 한다. functionSpec에 함수명·매개변수·반환형을 정의하고 solutions에는 호출 가능한 함수 정의만 작성하라. Python은 def 함수명(...), JavaScript는 function 함수명(...), Java는 public static 반환형 함수명(...) 형태로 작성하되 클래스·import·main을 넣지 말고 필요한 타입은 java.util.List처럼 완전한 이름을 사용하라. C++23은 반환형 함수명(...) 형태로 작성하되 main과 include를 넣지 말라. 표준입출력 코드는 모든 언어에서 금지한다. samples는 정확히 3개를 만들고 각 테스트에 화면 표시용 input/output과 실행용 arguments/expected를 모두 넣어라. 최소값·최대값·중복·음수·빈 결과 등 적용 가능한 경계를 포함한 hiddenTests를 최소 8개 만들고 모든 반환값은 정확해야 한다. 각 언어 해답과 oracle은 모든 테스트에서 동일한 값을 반환해야 한다. oracle에는 정답 산출 과정을 설명하는 20자 이상의 문자열을 넣어라. generatorSeed와 blueprintVersion은 입력값을 그대로 사용하라. JSON 스키마만 출력하라.`;
 }
 
 function parsePackage(content: string, request: GenerationRequest) {
@@ -159,6 +169,11 @@ function parsePackage(content: string, request: GenerationRequest) {
 function providerTimeout() {
     const value = Number(process.env.GENERATION_PROVIDER_TIMEOUT_MS);
     return Number.isInteger(value) && value >= 5_000 && value <= 300_000 ? value : 90_000;
+}
+
+function generationMaxTokens() {
+    const value = Number(process.env.GENERATION_MAX_TOKENS);
+    return Number.isInteger(value) && value >= 4_000 && value <= 32_000 ? value : 16_000;
 }
 
 const testSchema = {
@@ -238,10 +253,10 @@ export const packageJsonSchema = {
         "blueprintVersion",
     ],
     properties: {
-        title: { type: "string" },
-        statement: { type: "string" },
-        input: { type: "string" },
-        output: { type: "string" },
+        title: { type: "string", minLength: 5, maxLength: 100 },
+        statement: { type: "string", minLength: 250 },
+        input: { type: "string", minLength: 30 },
+        output: { type: "string", minLength: 30 },
         constraints: { type: "array", items: { type: "string" } },
         grade: { type: "integer" },
         primaryTag: { type: "string" },
@@ -265,20 +280,20 @@ export const packageJsonSchema = {
             },
         },
         samples: { type: "array", items: testSchema, minItems: 3, maxItems: 3 },
-        hiddenTests: { type: "array", items: testSchema, minItems: 5 },
-        explanation: { type: "string" },
+        hiddenTests: { type: "array", items: testSchema, minItems: 8 },
+        explanation: { type: "string", minLength: 150 },
         solutions: {
             type: "object",
             additionalProperties: false,
             required: ["python", "java", "javascript", "cpp"],
             properties: {
-                python: { type: "string" },
-                java: { type: "string" },
-                javascript: { type: "string" },
-                cpp: { type: "string" },
+                python: { type: "string", minLength: 20 },
+                java: { type: "string", minLength: 20 },
+                javascript: { type: "string", minLength: 20 },
+                cpp: { type: "string", minLength: 20 },
             },
         },
-        oracle: { type: "string" },
+        oracle: { type: "string", minLength: 20 },
         generatorSeed: { type: "integer" },
         blueprintVersion: { type: "string" },
     },

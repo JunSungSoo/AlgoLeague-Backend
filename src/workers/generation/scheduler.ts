@@ -51,22 +51,22 @@ export function scheduledGrades(
 
 export function generationBlueprint(grade: number) {
     if (grade === 1)
-        return "elite-grade-1: 국제 대회 결승 수준의 독창적인 복합 알고리즘 문제. 최소 두 가지 고급 알고리즘을 결합하고 단순 완전탐색이나 알려진 문제의 변형을 금지한다";
+        return "research-calibrated-grade-1: LeetCode Hard 상단·Codewars 1~2 kyu에 대응하는 국제 대회 결승 수준. 고급 알고리즘 두 가지 이상을 결합하고 비자명한 정당성 증명과 최적화가 필요해야 한다. 단순 템플릿 적용, 알려진 문제의 수치·서사 변형, 완전탐색 통과를 금지한다";
     if (grade === 2)
-        return "advanced-grade-2: 상태를 확장한 최단 경로, 고급 동적 계획법 또는 자료구조를 결합해야 하는 문제";
+        return "research-calibrated-grade-2: LeetCode Hard·Codewars 2~3 kyu 수준. 상태 확장 최단 경로·고급 동적 계획법·고급 자료구조 중 두 요소를 결합하고 표준 템플릿만으로 해결되지 않게 한다";
     if (grade === 3)
-        return "advanced-grade-3: 세그먼트 트리·분리 집합·트리 동적 계획법 중 하나를 핵심으로 사용하는 문제";
+        return "research-calibrated-grade-3: LeetCode Hard 입문·Codewars 3~4 kyu 수준. 세그먼트 트리·오프라인 분리 집합·트리 동적 계획법 중 하나와 별도의 관찰 또는 전처리를 결합해야 한다";
     if (grade === 4)
-        return "core-grade-4: 그래프 최단 경로, 동적 계획법 또는 위상 정렬을 적용해야 하는 문제";
+        return "research-calibrated-grade-4: LeetCode Medium 상단·Codewars 4 kyu 수준. 최단 경로·위상 정렬·상태 동적 계획법 중 하나가 필수이며 단순 BFS나 1차원 점화식으로 낮아지지 않아야 한다";
     if (grade === 5)
-        return "core-grade-5: 그리디·스택·큐 중 하나를 선택하고 정당성을 판단해야 하는 문제";
+        return "research-calibrated-grade-5: LeetCode Medium·Codewars 5 kyu 수준. 그리디·구간 처리·단조 스택·큐 중 하나를 선택하고 선택의 정당성 또는 불변식을 설명해야 한다";
     if (grade === 6)
-        return "core-grade-6: 누적 합·이분 탐색·BFS/DFS 중 하나를 활용해야 하며 단순 순회만으로 풀 수 없는 문제";
+        return "research-calibrated-grade-6: LeetCode Medium 입문·Codewars 5~6 kyu 수준. BFS/DFS·슬라이딩 윈도·이분 탐색 중 하나를 정확히 적용해야 하며 단순 순회나 정렬만으로 풀 수 없어야 한다";
     if (grade === 7)
-        return "core-grade-7: 정렬·해시·투 포인터 중 하나를 활용해 완전탐색을 개선하는 문제";
+        return "research-calibrated-grade-7: LeetCode Easy 상단~Medium 입문·Codewars 6 kyu 수준. 투 포인터·누적 합·해시·이분 탐색으로 명백한 O(N²) 완전탐색을 O(N log N) 또는 O(N)으로 개선해야 한다";
     if (grade === 8)
-        return "core-grade-8: 배열이나 문자열을 탐색하며 빈도·구간·상태를 함께 관리하는 문제";
-    return "core-grade-9: 배열 또는 문자열을 한 번 이상 탐색하며 조건에 맞는 위치·구간·상태를 찾아야 하는 입문 알고리즘 문제. 단순 사칙연산이나 값 하나의 공식 계산만으로 해결되는 문제는 금지한다";
+        return "research-calibrated-grade-8: LeetCode Easy·Codewars 6~7 kyu 수준. 배열이나 문자열을 탐색하며 빈도·해시·정렬 중 하나를 사용하고 최소 한 가지 경계 조건을 정확히 처리해야 한다";
+    return "research-calibrated-grade-9: LeetCode Easy 초반·Codewars 7 kyu 수준. 배열 또는 문자열을 한 번 이상 탐색하며 위치·연속 구간·빈도 상태를 관리해야 한다. 단순 사칙연산, 값 하나의 공식 계산, 조건문 한 번으로 해결되는 문제는 금지한다";
 }
 
 export async function enqueueScheduledGeneration(redis: Redis, now = dayjs().toDate()) {
