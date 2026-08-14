@@ -30,7 +30,7 @@ describe("generation providers", () => {
                 "javascript",
                 "cpp",
             ]);
-            if (seed === 2) expect(candidate.samples[0]?.output).toBe("7\n");
+            if (seed === 2) expect(candidate.samples[0]?.output).toBe("7");
         }
     });
 

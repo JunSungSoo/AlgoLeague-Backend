@@ -3,9 +3,9 @@ import { and, eq, sql } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db } from "../../db";
 import { generationJobs } from "../../db/schema";
+import { dayjs } from "../../lib/dayjs-config";
 import type { GenerationRequest } from "./generator";
 
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DEFAULT_HOUR = 0;
 const DEFAULT_MINUTE = 5;
 const DEFAULT_MEDIUM_WEEKDAYS = "1,3,5";
@@ -15,19 +15,17 @@ function integerSetting(value: string | undefined, fallback: number, min: number
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
-export function generationSchedule(now = new Date()) {
-    const kst = new Date(now.getTime() + KST_OFFSET_MS);
-    const day = kst.toISOString().slice(0, 10);
+export function generationSchedule(now = dayjs().toDate()) {
+    const kst = dayjs(now).tz();
+    const day = kst.format("YYYY-MM-DD");
     const hour = integerSetting(process.env.GENERATION_DAILY_HOUR_KST, DEFAULT_HOUR, 0, 23);
     const minute = integerSetting(process.env.GENERATION_DAILY_MINUTE_KST, DEFAULT_MINUTE, 0, 59);
     return {
         day,
-        weekday: kst.getUTCDay(),
+        weekday: kst.day(),
         hour,
         minute,
-        due:
-            kst.getUTCHours() > hour ||
-            (kst.getUTCHours() === hour && kst.getUTCMinutes() >= minute),
+        due: kst.hour() > hour || (kst.hour() === hour && kst.minute() >= minute),
     };
 }
 
@@ -40,7 +38,7 @@ function weekdays(value: string | undefined, fallback: string) {
 }
 
 export function scheduledGrades(
-    now = new Date(),
+    now = dayjs().toDate(),
     mediumDays = process.env.GENERATION_MEDIUM_WEEKDAYS_KST,
     eliteDays = process.env.GENERATION_ELITE_WEEKDAYS_KST,
 ) {
@@ -54,12 +52,24 @@ export function scheduledGrades(
 export function generationBlueprint(grade: number) {
     if (grade === 1)
         return "elite-grade-1: 국제 대회 결승 수준의 독창적인 복합 알고리즘 문제. 최소 두 가지 고급 알고리즘을 결합하고 단순 완전탐색이나 알려진 문제의 변형을 금지한다";
-    if (grade <= 3)
-        return `advanced-grade-${grade}: 고급 자료구조 또는 동적 계획법·그래프 최적화가 필요한 문제`;
-    return `core-grade-${grade}: 해당 급수 학습자가 핵심 알고리즘을 훈련할 수 있는 문제`;
+    if (grade === 2)
+        return "advanced-grade-2: 상태를 확장한 최단 경로, 고급 동적 계획법 또는 자료구조를 결합해야 하는 문제";
+    if (grade === 3)
+        return "advanced-grade-3: 세그먼트 트리·분리 집합·트리 동적 계획법 중 하나를 핵심으로 사용하는 문제";
+    if (grade === 4)
+        return "core-grade-4: 그래프 최단 경로, 동적 계획법 또는 위상 정렬을 적용해야 하는 문제";
+    if (grade === 5)
+        return "core-grade-5: 그리디·스택·큐 중 하나를 선택하고 정당성을 판단해야 하는 문제";
+    if (grade === 6)
+        return "core-grade-6: 누적 합·이분 탐색·BFS/DFS 중 하나를 활용해야 하며 단순 순회만으로 풀 수 없는 문제";
+    if (grade === 7)
+        return "core-grade-7: 정렬·해시·투 포인터 중 하나를 활용해 완전탐색을 개선하는 문제";
+    if (grade === 8)
+        return "core-grade-8: 배열이나 문자열을 탐색하며 빈도·구간·상태를 함께 관리하는 문제";
+    return "core-grade-9: 배열 또는 문자열을 한 번 이상 탐색하며 조건에 맞는 위치·구간·상태를 찾아야 하는 입문 알고리즘 문제. 단순 사칙연산이나 값 하나의 공식 계산만으로 해결되는 문제는 금지한다";
 }
 
-export async function enqueueScheduledGeneration(redis: Redis, now = new Date()) {
+export async function enqueueScheduledGeneration(redis: Redis, now = dayjs().toDate()) {
     const schedule = generationSchedule(now);
     if (!schedule.due) return 0;
     const numericDay = Number(schedule.day.replaceAll("-", ""));
@@ -107,7 +117,11 @@ export async function enqueueScheduledGeneration(redis: Redis, now = new Date())
             if (retryableFailure) {
                 [job] = await tx
                     .update(generationJobs)
-                    .set({ state: "REQUESTED", failureReason: null, updatedAt: new Date() })
+                    .set({
+                        state: "REQUESTED",
+                        failureReason: null,
+                        updatedAt: dayjs().toDate(),
+                    })
                     .where(eq(generationJobs.id, job.id))
                     .returning();
                 await redis.del(`generation:enqueue:${job.id}`);

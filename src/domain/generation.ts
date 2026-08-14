@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { functionSpecSchema, functionTestSchema } from "./function-spec";
 
 export const generationStates = [
     "REQUESTED",
@@ -32,8 +33,9 @@ export const problemPackageSchema = z.object({
     grade: z.number().int().min(1).max(9),
     primaryTag: z.string().min(1),
     secondaryTags: z.array(z.string()),
-    samples: z.array(z.object({ input: z.string(), output: z.string() })).min(1),
-    hiddenTests: z.array(z.object({ input: z.string(), output: z.string() })).min(2),
+    functionSpec: functionSpecSchema,
+    samples: z.array(functionTestSchema).length(3),
+    hiddenTests: z.array(functionTestSchema).min(5),
     explanation: z.string().min(50),
     solutions: z.object({
         python: z.string(),
