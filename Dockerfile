@@ -18,8 +18,10 @@ CMD ["node", "dist/server.js"]
 
 FROM runner AS sandbox
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends python3 default-jdk-headless g++ && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io && rm -rf /var/lib/apt/lists/*
 USER backend
+EXPOSE 4100
+ENV SANDBOX_PORT=4100
 CMD ["node", "dist/sandbox-server.js"]
 
 FROM runner AS production

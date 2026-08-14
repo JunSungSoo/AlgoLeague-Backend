@@ -63,11 +63,11 @@ services:
         environment:
             DATABASE_URL: postgres://champions:champions@postgres:5432/champions
             REDIS_URL: redis://redis:6379
-            JUDGE_IMAGE_PREFIX: ${JUDGE_IMAGE_PREFIX:-algorithm-champions/judge}
+            SANDBOX_SERVICE_URL: ${SANDBOX_SERVICE_URL:?set SANDBOX_SERVICE_URL to the dedicated runner}
+            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:?set SANDBOX_SERVICE_TOKEN}
         depends_on:
             postgres: { condition: service_healthy }
             redis: { condition: service_healthy }
-        volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
     generation-worker:
         profiles: ["workers"]
         restart: unless-stopped
@@ -85,9 +85,9 @@ services:
             OPENAI_API_KEY: ${OPENAI_API_KEY:-}
             OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
             GENERATION_PROVIDERS: ${GENERATION_PROVIDERS:-openai,openrouter,ollama,rule}
-            GENERATION_PROVIDER_TIMEOUT_MS: ${GENERATION_PROVIDER_TIMEOUT_MS:-90000}
+            GENERATION_PROVIDER_TIMEOUT_MS: ${GENERATION_PROVIDER_TIMEOUT_MS:-180000}
             OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-            OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+            OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-20b:free}
             OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
             OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
             OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
@@ -96,46 +96,12 @@ services:
             # 0=일요일, 1=월요일, ... 6=토요일
             GENERATION_MEDIUM_WEEKDAYS_KST: ${GENERATION_MEDIUM_WEEKDAYS_KST:-1,3,5}
             GENERATION_ELITE_WEEKDAYS_KST: ${GENERATION_ELITE_WEEKDAYS_KST:-0}
-            SANDBOX_SERVICE_URL: http://sandbox-runner:4100
-            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-algoleague-local-sandbox-token}
+            SANDBOX_SERVICE_URL: ${SANDBOX_SERVICE_URL:?set SANDBOX_SERVICE_URL to the dedicated runner}
+            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:?set SANDBOX_SERVICE_TOKEN}
         depends_on:
             postgres: { condition: service_healthy }
             redis: { condition: service_healthy }
-            sandbox-runner: { condition: service_healthy }
-        networks: [default, sandbox-internal]
         extra_hosts: ["host.docker.internal:host-gateway"]
-    sandbox-runner:
-        profiles: ["workers"]
-        restart: unless-stopped
-        build:
-            context: .
-            dockerfile: Dockerfile
-            target: sandbox
-        command: ["node", "dist/sandbox-server.js"]
-        environment:
-            SANDBOX_PORT: 4100
-            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-algoleague-local-sandbox-token}
-        expose: ["4100"]
-        networks: [sandbox-internal]
-        pids_limit: 64
-        mem_limit: 1536m
-        cpus: 1.5
-        read_only: true
-        # Compiled C++ binaries live only in this isolated tmpfs and must be executable.
-        tmpfs: ["/tmp:rw,exec,nosuid,nodev,size=64m"]
-        cap_drop: ["ALL"]
-        security_opt: ["no-new-privileges:true"]
-        healthcheck:
-            test:
-                [
-                    "CMD",
-                    "node",
-                    "-e",
-                    "fetch('http://127.0.0.1:4100/health').then(r=>{if(!r.ok)process.exit(1)})",
-                ]
-            interval: 10s
-            timeout: 3s
-            retries: 10
     policy-worker:
         profiles: ["workers"]
         build:
@@ -153,7 +119,3 @@ services:
 volumes:
     postgres-data:
     redis-data:
-
-networks:
-    sandbox-internal:
-        internal: true

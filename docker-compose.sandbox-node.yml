@@ -1,0 +1,35 @@
+name: algorithm-champions-sandbox
+
+# 전용 실행 노드/VM에서만 사용합니다. 이 호스트에는 DB, Redis, OpenAI 자격증명을 두지 않습니다.
+services:
+    sandbox-runner:
+        restart: unless-stopped
+        init: true
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: sandbox
+        environment:
+            SANDBOX_PORT: 4100
+            SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:?set SANDBOX_SERVICE_TOKEN}
+        ports: ["${SANDBOX_BIND_ADDRESS:-127.0.0.1}:4100:4100"]
+        volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+        group_add: ["${DOCKER_GID:?set DOCKER_GID to the Docker socket group id}"]
+        pids_limit: 128
+        mem_limit: 512m
+        cpus: 1
+        read_only: true
+        tmpfs: ["/tmp:rw,nosuid,nodev,size=64m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "fetch('http://127.0.0.1:4100/health').then(r=>{if(!r.ok)process.exit(1)})",
+                ]
+            interval: 10s
+            timeout: 3s
+            retries: 10
