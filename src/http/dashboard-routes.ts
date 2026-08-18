@@ -47,8 +47,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
                     slug: problems.slug,
                     title: problems.title,
                     grade: problems.grade,
-                    primaryTag: problems.primaryTag,
-                    secondaryTags: problems.secondaryTags,
                 },
             })
             .from(assignments)
@@ -65,8 +63,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
                         slug: problems.slug,
                         title: problems.title,
                         grade: problems.grade,
-                        primaryTag: problems.primaryTag,
-                        secondaryTags: problems.secondaryTags,
                     },
                 })
                 .from(assignments)
@@ -121,8 +117,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
                             slug: candidate.problems.slug,
                             title: candidate.problems.title,
                             grade: candidate.problems.grade,
-                            primaryTag: candidate.problems.primaryTag,
-                            secondaryTags: candidate.problems.secondaryTags,
                         },
                     };
             }

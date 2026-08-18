@@ -105,8 +105,6 @@ export async function registerRoutes(app: FastifyInstance) {
                     slug: problems.slug,
                     title: problems.title,
                     grade: problems.grade,
-                    primaryTag: problems.primaryTag,
-                    secondaryTags: problems.secondaryTags,
                     timeLimitMs: problems.timeLimitMs,
                     publishedAt: problems.publishedAt,
                 })
@@ -190,8 +188,6 @@ export async function registerRoutes(app: FastifyInstance) {
                     slug: problems.slug,
                     title: problems.title,
                     grade: problems.grade,
-                    primaryTag: problems.primaryTag,
-                    secondaryTags: problems.secondaryTags,
                     timeLimitMs: problems.timeLimitMs,
                     publishedAt: problems.publishedAt,
                     lastSubmittedAt: sql<Date>`max(${submissions.createdAt})`,
@@ -275,8 +271,17 @@ export async function registerRoutes(app: FastifyInstance) {
                 .select({
                     problemId: solvedProblems.problemId,
                     submissionId: solvedProblems.submissionId,
+                    language: submissions.language,
+                    runtimeVersion: submissions.runtimeVersion,
+                    sourceCode: submissions.sourceCode,
+                    verdict: submissions.verdict,
+                    runtimeMs: submissions.runtimeMs,
+                    memoryKb: submissions.memoryKb,
+                    errorMessage: submissions.errorMessage,
+                    judgedAt: submissions.judgedAt,
                 })
                 .from(solvedProblems)
+                .innerJoin(submissions, eq(solvedProblems.submissionId, submissions.id))
                 .where(
                     and(
                         eq(solvedProblems.userId, session.userId),
@@ -292,6 +297,7 @@ export async function registerRoutes(app: FastifyInstance) {
                     and(
                         eq(submissions.userId, session.userId),
                         eq(submissions.problemId, problem.id),
+                        eq(submissions.countsForGrade, true),
                         notInArray(submissions.verdict, ["JH", "IE"]),
                     ),
                 ),
@@ -323,11 +329,23 @@ export async function registerRoutes(app: FastifyInstance) {
                 sampleTests:
                     problem.executionMode === "function" ? problem.samples.slice(0, 3) : [],
                 grade: problem.grade,
-                primaryTag: problem.primaryTag,
-                secondaryTags: problem.secondaryTags,
                 timeLimitMs: problem.timeLimitMs,
                 solved: Boolean(solved),
                 acceptedSubmissionId: solved?.submissionId ?? null,
+                acceptedSubmission: solved
+                    ? {
+                          id: solved.submissionId,
+                          language: solved.language,
+                          runtimeVersion:
+                              solved.runtimeVersion ?? defaultRuntimeVersion(solved.language),
+                          sourceCode: solved.sourceCode,
+                          verdict: solved.verdict,
+                          runtimeMs: solved.runtimeMs,
+                          memoryKb: solved.memoryKb,
+                          errorMessage: solved.errorMessage,
+                          judgedAt: solved.judgedAt ? dayjs(solved.judgedAt).toISOString() : null,
+                      }
+                    : null,
                 attempts,
                 submissionLimit: limit,
             },
@@ -953,7 +971,7 @@ export async function registerRoutes(app: FastifyInstance) {
                 message: "제출이 채점 큐에 등록되었습니다. (개발 미리보기)",
             });
         const { db } = await import("../db/index");
-        const { problems, submissions, users } = await import("../db/schema");
+        const { problems, solvedProblems, submissions, users } = await import("../db/schema");
         const [[user], [problem]] = await Promise.all([
             db
                 .select({ grade: users.grade })
@@ -979,18 +997,33 @@ export async function registerRoutes(app: FastifyInstance) {
             return reply
                 .code(403)
                 .send({ error: `현재 ${user.grade}급에서는 이 문제를 제출할 수 없습니다.` });
-        const [{ value: attempts }] = await db
-            .select({ value: count() })
-            .from(submissions)
-            .where(
-                and(
-                    eq(submissions.userId, session.userId),
-                    eq(submissions.problemId, problem.id),
-                    notInArray(submissions.verdict, ["JH", "IE"]),
+        const [[{ value: attempts }], [solved]] = await Promise.all([
+            db
+                .select({ value: count() })
+                .from(submissions)
+                .where(
+                    and(
+                        eq(submissions.userId, session.userId),
+                        eq(submissions.problemId, problem.id),
+                        eq(submissions.countsForGrade, true),
+                        notInArray(submissions.verdict, ["JH", "IE"]),
+                    ),
                 ),
-            );
+            db
+                .select({ problemId: solvedProblems.problemId })
+                .from(solvedProblems)
+                .where(
+                    and(
+                        eq(solvedProblems.userId, session.userId),
+                        eq(solvedProblems.problemId, problem.id),
+                        isNull(solvedProblems.voidedAt),
+                    ),
+                )
+                .limit(1),
+        ]);
         const limit = submissionLimit(problem.grade as Grade);
-        if (attempts >= limit)
+        const practiceSubmission = Boolean(solved);
+        if (!practiceSubmission && attempts >= limit)
             return reply
                 .code(409)
                 .send({ error: `등급 효력 제출 ${limit}회를 모두 사용했습니다.` });
@@ -1005,6 +1038,7 @@ export async function registerRoutes(app: FastifyInstance) {
                 parsed.data.runtimeVersion ?? defaultRuntimeVersion(parsed.data.language),
             sourceCode: parsed.data.code,
             attemptNumber: attempts + 1,
+            countsForGrade: !practiceSubmission,
             traceId,
         });
         const redis = new Redis(process.env.REDIS_URL, {
@@ -1019,7 +1053,9 @@ export async function registerRoutes(app: FastifyInstance) {
             traceId,
             status: "QU",
             verdict: "QU",
-            message: `제출이 채점 큐에 등록되었습니다. 남은 횟수 ${limit - attempts - 1}회`,
+            message: practiceSubmission
+                ? "재풀이 답안이 연습 제출로 채점 큐에 등록되었습니다."
+                : `제출이 채점 큐에 등록되었습니다. 남은 횟수 ${limit - attempts - 1}회`,
         });
     });
 }
