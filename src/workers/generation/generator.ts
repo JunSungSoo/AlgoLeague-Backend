@@ -156,7 +156,7 @@ function generationPrompt(request: GenerationRequest) {
 }
 
 function parsePackage(content: string, request: GenerationRequest) {
-    const parsed = problemPackageSchema.parse(JSON.parse(content));
+    const parsed = problemPackageSchema.parse(parseGenerationJson(content));
     if (
         parsed.grade !== request.grade ||
         parsed.generatorSeed !== request.seed ||
@@ -164,6 +164,12 @@ function parsePackage(content: string, request: GenerationRequest) {
     )
         throw new Error("요청 메타데이터와 생성 결과가 일치하지 않습니다.");
     return parsed;
+}
+
+export function parseGenerationJson(content: string) {
+    const normalized = content.replace(/^\uFEFF/, "").trim();
+    const fenced = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    return JSON.parse(fenced?.[1] ?? normalized) as unknown;
 }
 
 function providerTimeout() {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { generationBlueprint, generationSchedule, scheduledGrades } from "./scheduler";
+import {
+    generationBlueprint,
+    generationRetryDecision,
+    generationRetryDelayMinutes,
+    generationSchedule,
+    scheduledGrades,
+} from "./scheduler";
 import { dayjs } from "../../lib/dayjs-config";
 
 describe("tiered generation schedule", () => {
@@ -32,5 +38,43 @@ describe("tiered generation schedule", () => {
         expect(schedule.day).toBe("2026-08-16");
         expect(schedule.weekday).toBe(0);
         expect(schedule.due).toBe(true);
+    });
+
+    it("applies exponential retry backoff with a configured ceiling", () => {
+        expect(generationRetryDelayMinutes(1, 15, 60)).toBe(15);
+        expect(generationRetryDelayMinutes(2, 15, 60)).toBe(30);
+        expect(generationRetryDelayMinutes(3, 15, 60)).toBe(60);
+        expect(generationRetryDelayMinutes(8, 15, 60)).toBe(60);
+    });
+
+    it("waits for backoff and stops after the maximum attempts", () => {
+        const updatedAt = dayjs("2026-08-18T00:00:00Z").toDate();
+        expect(
+            generationRetryDecision(
+                { attempts: 2, updatedAt },
+                dayjs("2026-08-18T00:29:59Z").toDate(),
+                4,
+                15,
+                360,
+            ),
+        ).toBe("WAITING");
+        expect(
+            generationRetryDecision(
+                { attempts: 2, updatedAt },
+                dayjs("2026-08-18T00:30:00Z").toDate(),
+                4,
+                15,
+                360,
+            ),
+        ).toBe("READY");
+        expect(
+            generationRetryDecision(
+                { attempts: 4, updatedAt },
+                dayjs("2026-08-19T00:00:00Z").toDate(),
+                4,
+                15,
+                360,
+            ),
+        ).toBe("EXHAUSTED");
     });
 });

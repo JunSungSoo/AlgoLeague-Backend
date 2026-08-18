@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type Redis from "ioredis";
 import { db } from "../../db";
 import { generationJobs } from "../../db/schema";
+import { GENERATION_JOB_STALE_MINUTES } from "../../domain/generation";
 import { dayjs } from "../../lib/dayjs-config";
 import type { GenerationRequest } from "./generator";
 
@@ -10,11 +11,58 @@ const DEFAULT_HOUR = 0;
 const DEFAULT_MINUTE = 5;
 const DEFAULT_MEDIUM_WEEKDAYS = "1,3,5";
 const DEFAULT_ELITE_WEEKDAYS = "0";
+const DEFAULT_MAX_ATTEMPTS = 4;
+const DEFAULT_RETRY_BASE_MINUTES = 15;
+const DEFAULT_RETRY_MAX_MINUTES = 360;
+const ENQUEUE_LOCK_TTL_SECONDS = 86_400;
 
 function integerSetting(value: string | undefined, fallback: number, min: number, max: number) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
+
+export function generationRetryDelayMinutes(
+    attempts: number,
+    baseMinutes = integerSetting(
+        process.env.GENERATION_RETRY_BASE_MINUTES,
+        DEFAULT_RETRY_BASE_MINUTES,
+        1,
+        1_440,
+    ),
+    maxMinutes = integerSetting(
+        process.env.GENERATION_RETRY_MAX_MINUTES,
+        DEFAULT_RETRY_MAX_MINUTES,
+        1,
+        10_080,
+    ),
+) {
+    return Math.min(maxMinutes, baseMinutes * 2 ** Math.max(0, attempts - 1));
+}
+
+export function generationRetryDecision(
+    job: { attempts: number; updatedAt: Date },
+    now = dayjs().toDate(),
+    maxAttempts = integerSetting(process.env.GENERATION_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS, 1, 20),
+    baseMinutes = integerSetting(
+        process.env.GENERATION_RETRY_BASE_MINUTES,
+        DEFAULT_RETRY_BASE_MINUTES,
+        1,
+        1_440,
+    ),
+    maxMinutes = integerSetting(
+        process.env.GENERATION_RETRY_MAX_MINUTES,
+        DEFAULT_RETRY_MAX_MINUTES,
+        1,
+        10_080,
+    ),
+) {
+    if (job.attempts >= maxAttempts) return "EXHAUSTED" as const;
+    const delay = generationRetryDelayMinutes(job.attempts, baseMinutes, maxMinutes);
+    return dayjs(now).isBefore(dayjs(job.updatedAt).add(delay, "minute"))
+        ? ("WAITING" as const)
+        : ("READY" as const);
+}
+
 export function generationSchedule(now = dayjs().toDate()) {
     const kst = dayjs(now).tz();
     const day = kst.format("YYYY-MM-DD");
@@ -113,21 +161,41 @@ export async function enqueueScheduledGeneration(redis: Redis, now = dayjs().toD
                 );
             const generatorFailure = job.state === "REJECTED_SCHEMA";
             const retryableFailure = sandboxFailure || generatorFailure;
-            if (job.state !== "REQUESTED" && !retryableFailure) return;
-            if (retryableFailure) {
+            const staleGeneration =
+                job.state === "GENERATING" &&
+                dayjs(now).diff(dayjs(job.updatedAt), "minute", true) >=
+                    GENERATION_JOB_STALE_MINUTES;
+            if (job.state !== "REQUESTED" && !retryableFailure && !staleGeneration) return;
+            if (retryableFailure || staleGeneration) {
+                const retryDecision = generationRetryDecision(job, now);
+                if (retryDecision === "EXHAUSTED") {
+                    if (staleGeneration)
+                        await tx
+                            .update(generationJobs)
+                            .set({
+                                state: "REJECTED_SCHEMA",
+                                failureReason: "문제 생성 최대 재시도 횟수를 초과했습니다.",
+                                updatedAt: now,
+                            })
+                            .where(eq(generationJobs.id, job.id));
+                    await redis.del(`generation:enqueue:${job.id}`);
+                    return;
+                }
+                if (retryDecision === "WAITING") return;
                 [job] = await tx
                     .update(generationJobs)
                     .set({
                         state: "REQUESTED",
                         failureReason: null,
-                        updatedAt: dayjs().toDate(),
+                        updatedAt: now,
                     })
                     .where(eq(generationJobs.id, job.id))
                     .returning();
                 await redis.del(`generation:enqueue:${job.id}`);
             }
             const retryKey = `generation:enqueue:${job.id}`;
-            if ((await redis.set(retryKey, "1", "NX")) !== "OK") return;
+            if ((await redis.set(retryKey, "1", "EX", ENQUEUE_LOCK_TTL_SECONDS, "NX")) !== "OK")
+                return;
             const request: GenerationRequest & { id: string; champions: boolean } = {
                 id: job.id,
                 grade,
@@ -136,7 +204,12 @@ export async function enqueueScheduledGeneration(redis: Redis, now = dayjs().toD
                 seed,
                 champions: false,
             };
-            await redis.lpush("generation:requested", JSON.stringify(request));
+            try {
+                await redis.lpush("generation:requested", JSON.stringify(request));
+            } catch (error) {
+                await redis.del(retryKey);
+                throw error;
+            }
             queued += 1;
         });
     }

@@ -30,6 +30,9 @@ while (true) {
     const item = await redis.brpop("generation:requested", 60);
     if (!item) continue;
     const job = JSON.parse(item[1]) as GenerationRequest & { id: string; champions?: boolean };
-    await redis.del(`generation:enqueue:${job.id}`);
-    await processGenerationJob(redis, job);
+    try {
+        await processGenerationJob(redis, job);
+    } finally {
+        await redis.del(`generation:enqueue:${job.id}`);
+    }
 }

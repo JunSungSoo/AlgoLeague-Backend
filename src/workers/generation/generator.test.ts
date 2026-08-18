@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateCandidate, providerOrder, ruleCandidate } from "./generator";
+import { generateCandidate, parseGenerationJson, providerOrder, ruleCandidate } from "./generator";
 
 const request = {
     grade: 9,
@@ -44,5 +44,12 @@ describe("generation providers", () => {
         await expect(
             generateCandidate(request, new Set(["rule", "openai", "openrouter", "ollama"])),
         ).rejects.toThrow("사용 가능한 문제 생성 공급자가 없습니다");
+    });
+
+    it("accepts JSON wrapped in a Markdown code fence", () => {
+        expect(parseGenerationJson('```json\n{"title":"알고달"}\n```')).toEqual({
+            title: "알고달",
+        });
+        expect(parseGenerationJson('\uFEFF  {"grade":9}  ')).toEqual({ grade: 9 });
     });
 });
