@@ -11,6 +11,7 @@ import {
 } from "./auth";
 import { hashPassword, verifyPassword } from "../services/password";
 import { dayjs } from "../lib/dayjs-config";
+import { defaultRuntimeVersion, isRuntimeVersion } from "../domain/runtime-versions";
 
 const languageSchema = z.enum(["python", "java", "javascript", "cpp"]);
 const phoneSchema = z
@@ -70,6 +71,7 @@ type PreviewUser = {
     address: string | null;
     profileImageUrl: string | null;
     preferredLanguage: z.infer<typeof languageSchema>;
+    preferredRuntimeVersion: string | null;
     role: "LEARNER";
     grade: number;
     verifiedSolves: number;
@@ -100,6 +102,7 @@ type PublicUserSource = {
     address: string | null;
     profileImageUrl: string | null;
     preferredLanguage: "python" | "java" | "javascript" | "cpp";
+    preferredRuntimeVersion?: string | null;
     role: "LEARNER" | "OPERATOR" | "ADMIN";
     grade: number;
     verifiedSolves: number;
@@ -114,6 +117,8 @@ function publicUser(user: PublicUserSource) {
         address: user.address,
         profileImageUrl: user.profileImageUrl,
         preferredLanguage: user.preferredLanguage,
+        preferredRuntimeVersion:
+            user.preferredRuntimeVersion ?? defaultRuntimeVersion(user.preferredLanguage),
         role: user.role,
         grade: user.grade,
         verifiedSolves: user.verifiedSolves,
@@ -351,6 +356,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                 address: parsed.data.address || null,
                 profileImageUrl: null,
                 preferredLanguage: parsed.data.preferredLanguage,
+                preferredRuntimeVersion: defaultRuntimeVersion(parsed.data.preferredLanguage),
                 role: "LEARNER",
                 grade: 9,
                 verifiedSolves: 0,
@@ -370,6 +376,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                     nickname: parsed.data.nickname,
                     address: parsed.data.address || null,
                     preferredLanguage: parsed.data.preferredLanguage,
+                    preferredRuntimeVersion: defaultRuntimeVersion(parsed.data.preferredLanguage),
                 })
                 .returning();
             if (!created)
@@ -385,6 +392,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                 address: created.address,
                 profileImageUrl: created.profileImageUrl,
                 preferredLanguage: created.preferredLanguage,
+                preferredRuntimeVersion: created.preferredRuntimeVersion,
                 role: "LEARNER",
                 grade: created.grade,
                 verifiedSolves: created.verifiedSolves,
@@ -545,13 +553,27 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     app.post("/api/profile/preferred-language", async (request, reply) => {
         const session = await getSession(request);
         if (!session) return reply.code(401).send({ error: "로그인이 필요합니다." });
-        const parsed = z.object({ preferredLanguage: languageSchema }).safeParse(request.body);
+        const parsed = z
+            .object({
+                preferredLanguage: languageSchema,
+                preferredRuntimeVersion: z.string().min(1).max(40),
+            })
+            .superRefine((value, context) => {
+                if (!isRuntimeVersion(value.preferredLanguage, value.preferredRuntimeVersion))
+                    context.addIssue({
+                        code: "custom",
+                        path: ["preferredRuntimeVersion"],
+                        message: "선택한 언어에서 지원하지 않는 실행 버전입니다.",
+                    });
+            })
+            .safeParse(request.body);
         if (!parsed.success)
             return reply.code(400).send({ error: "지원하는 프로그래밍 언어를 선택해 주세요." });
         const user = await findUserById(session.userId);
         if (!user) return reply.code(404).send({ error: "회원 정보를 찾을 수 없습니다." });
         if (!process.env.DATABASE_URL) {
             user.preferredLanguage = parsed.data.preferredLanguage;
+            user.preferredRuntimeVersion = parsed.data.preferredRuntimeVersion;
         } else {
             const { db } = await import("../db/index");
             const { users } = await import("../db/schema");
@@ -559,13 +581,18 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                 .update(users)
                 .set({
                     preferredLanguage: parsed.data.preferredLanguage,
+                    preferredRuntimeVersion: parsed.data.preferredRuntimeVersion,
                     updatedAt: dayjs().toDate(),
                 })
                 .where(eq(users.id, user.id));
         }
         return {
-            user: publicUser({ ...user, preferredLanguage: parsed.data.preferredLanguage }),
-            message: "선호 프로그래밍 언어가 변경되었습니다.",
+            user: publicUser({
+                ...user,
+                preferredLanguage: parsed.data.preferredLanguage,
+                preferredRuntimeVersion: parsed.data.preferredRuntimeVersion,
+            }),
+            message: "선호 프로그래밍 언어와 실행 버전이 변경되었습니다.",
         };
     });
     app.post("/api/profile/image", async (request, reply) => {

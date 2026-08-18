@@ -78,6 +78,7 @@ export const users = pgTable(
         address: text("address"),
         profileImageUrl: text("profile_image_url"),
         preferredLanguage: languageEnum("preferred_language").notNull().default("python"),
+        preferredRuntimeVersion: text("preferred_runtime_version"),
         role: roleEnum("role").notNull().default("LEARNER"),
         grade: integer("grade").notNull().default(9),
         verifiedSolves: integer("verified_solves").notNull().default(0),

@@ -198,9 +198,17 @@ describe("backend API", () => {
             method: "POST",
             url: "/api/profile/preferred-language",
             headers: sessionHeaders,
-            payload: { preferredLanguage: "java" },
+            payload: { preferredLanguage: "java", preferredRuntimeVersion: "java21" },
         });
         expect(language.json().user.preferredLanguage).toBe("java");
+        expect(language.json().user.preferredRuntimeVersion).toBe("java21");
+        const invalidRuntime = await app.inject({
+            method: "POST",
+            url: "/api/profile/preferred-language",
+            headers: sessionHeaders,
+            payload: { preferredLanguage: "java", preferredRuntimeVersion: "node24" },
+        });
+        expect(invalidRuntime.statusCode).toBe(400);
         const passwordWithoutVerification = await app.inject({
             method: "POST",
             url: "/api/profile/password",
